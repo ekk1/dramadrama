@@ -477,11 +477,17 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	err := s.pipe.Run(context.WithoutCancel(r.Context()), req, func(e pipeline.Event) { send(e.Type, e.Text) })
+	tr := translator(langOf(r))
+	err := s.pipe.Run(context.WithoutCancel(r.Context()), req, func(e pipeline.Event) {
+		if e.Type == "status" {
+			e.Text = tr(e.Text)
+		}
+		send(e.Type, e.Text)
+	})
 	close(stop)
 	if err != nil {
 		log.Printf("run %s %s %s: %v", id, req.Stage, req.Target, err)
-		send("error", err.Error())
+		send("error", tr(err.Error()))
 		return
 	}
 	send("done", "ok")

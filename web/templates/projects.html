@@ -1,11 +1,11 @@
 {{define "content"}}
-<h1>Projects</h1>
+<h1>{{t "Projects"}}</h1>
 <section class="stage">
-  <h2>New project</h2>
+  <h2>{{t "New project"}}</h2>
   <form method="post" action="/projects" class="grid-form">
-    <label>Name <input name="name" placeholder="Untitled"></label>
-    <label class="wide">Core idea <textarea name="idea" rows="3" placeholder="What is the drama about?"></textarea></label>
-    <div class="wide actions"><button class="btn primary">Create</button></div>
+    <label>{{t "Name"}} <input name="name" placeholder="{{t "Untitled"}}"></label>
+    <label class="wide">{{t "Core idea"}} <textarea name="idea" rows="3" placeholder="{{t "What is the drama about?"}}"></textarea></label>
+    <div class="wide actions"><button class="btn primary">{{t "Create"}}</button></div>
   </form>
 </section>
 <div class="project-list">
@@ -16,16 +16,16 @@
       <strong>{{.Name}}</strong>
       <p class="muted small">{{trunc .Idea 140}}</p>
       <p class="pc-progress small">
-        <span class="{{if .Story}}ok{{end}}">story</span>
-        <span class="{{if .Visuals}}ok{{end}}">{{len .Visuals}} visuals</span>
-        <span class="{{if .Shots}}ok{{end}}">{{len .Shots}} shots</span>
-        <span class="{{if .Keyframes}}ok{{end}}">{{.Keyframes}} keyframes</span>
+        <span class="{{if .Story}}ok{{end}}">{{t "story"}}</span>
+        <span class="{{if .Visuals}}ok{{end}}">{{len .Visuals}} {{t "visuals"}}</span>
+        <span class="{{if .Shots}}ok{{end}}">{{len .Shots}} {{t "shots"}}</span>
+        <span class="{{if .Keyframes}}ok{{end}}">{{.Keyframes}} {{t "keyframes"}}</span>
       </p>
-      <p class="muted small">Updated {{time .UpdatedAt}}</p>
+      <p class="muted small">{{t "Updated"}} {{time .UpdatedAt}}</p>
     </div>
   </a>
 {{else}}
-  <p class="muted">No projects yet.</p>
+  <p class="muted">{{t "No projects yet."}}</p>
 {{end}}
 </div>
 {{end}}

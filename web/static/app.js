@@ -7,6 +7,9 @@
 "use strict";
 
 (function () {
+  // Translated UI strings injected by the server (window.I18N); fall back to English.
+  const T = (k) => (window.I18N && window.I18N[k]) || k;
+
   const store = {
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } },
@@ -129,7 +132,7 @@
     const button = form.querySelector("button");
     const label = button.textContent;
     button.disabled = true;
-    button.textContent = "Running…";
+    button.textContent = T("Running…");
     if (log) {
       log.box.hidden = false;
       log.box.classList.add("running");
@@ -181,21 +184,21 @@
             case "status": append(log.pre, "\n› " + text + "\n", "st"); break;
             case "error":
               failed = true;
-              stateText = "Failed: " + text;
+              stateText = T("Failed: ") + text;
               append(log.pre, "\n✗ " + text + "\n", "er");
               break;
-            case "done": stateText = label + ": done"; break;
+            case "done": stateText = label + ": " + T("done"); break;
           }
         }
       }
     } catch (err) {
       failed = true;
-      stateText = "Failed: " + err.message;
+      stateText = T("Failed: ") + err.message;
       if (log) append(log.pre, "\n✗ " + err.message + "\n", "er");
     } finally {
       activeRuns--;
     }
-    if (log) persistLog(logId, log, stateText || (label + ": finished"), failed);
+    if (log) persistLog(logId, log, stateText || (label + ": " + T("finished")), failed);
     saveScroll();
     location.reload();
   }
@@ -216,12 +219,12 @@
       if (scope.value === "project" && projectID) params.set("project", projectID);
       if (kind.value) params.set("kind", kind.value);
       if (q.value.trim()) params.set("q", q.value.trim());
-      grid.textContent = "Loading…";
+      grid.textContent = T("Loading…");
       try {
         const resp = await fetch("/api/assets?" + params);
         const items = await resp.json();
         grid.textContent = "";
-        if (!items.length) { grid.textContent = "No assets found."; return; }
+        if (!items.length) { grid.textContent = T("No assets found."); return; }
         for (const it of items) {
           const b = document.createElement("button");
           b.type = "button";
@@ -236,7 +239,7 @@
           grid.appendChild(b);
         }
       } catch (err) {
-        grid.textContent = "Failed to load: " + err.message;
+        grid.textContent = T("Failed to load: ") + err.message;
       }
     }
 

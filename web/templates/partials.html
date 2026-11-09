@@ -4,12 +4,12 @@
 {{define "refs"}}
 <div class="refs">
   <div class="refs-head">
-    <span class="label">{{.Label}}</span>
-    <button type="button" class="btn small" data-pick data-action="/projects/{{.P.ID}}/refs" data-target="{{.Target}}" data-back="{{.Back}}">+ From library</button>
+    <span class="label">{{t .Label}}</span>
+    <button type="button" class="btn small" data-pick data-action="/projects/{{.P.ID}}/refs" data-target="{{.Target}}" data-back="{{.Back}}">{{t "+ From library"}}</button>
     <form method="post" action="/projects/{{.P.ID}}/upload" enctype="multipart/form-data" class="inline">
       <input type="hidden" name="target" value="{{.Target}}">
       <input type="hidden" name="back" value="{{.Back}}">
-      <label class="btn small">Upload<input type="file" name="files" accept="image/*" multiple data-autosubmit hidden></label>
+      <label class="btn small">{{t "Upload"}}<input type="file" name="files" accept="image/*" multiple data-autosubmit hidden></label>
     </form>
   </div>
   {{$ctx := .}}
@@ -22,23 +22,23 @@
         {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
       </a>
       <figcaption>
-        {{if and $ctx.Primary (eq .ID $primary)}}<span class="tag">in use</span>{{end}}
+        {{if and $ctx.Primary (eq .ID $primary)}}<span class="tag">{{t "in use"}}</span>{{end}}
         {{if and $ctx.Primary (ne .ID $primary)}}
         <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
           <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
           <input type="hidden" name="op" value="primary"><input type="hidden" name="back" value="{{$ctx.Back}}">
-          <button class="link" title="Use this image downstream">use</button>
+          <button class="link" title="{{t "Use this image downstream"}}">{{t "use"}}</button>
         </form>{{end}}
         <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
           <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
           <input type="hidden" name="op" value="remove"><input type="hidden" name="back" value="{{$ctx.Back}}">
-          <button class="link danger" title="Unlink (the asset stays in the library)">unlink</button>
+          <button class="link danger" title="{{t "Unlink (the asset stays in the library)"}}">{{t "unlink"}}</button>
         </form>
       </figcaption>
     </figure>
     {{end}}{{end}}
   </div>
-  {{else}}<p class="muted small">{{if .Empty}}{{.Empty}}{{else}}None.{{end}}</p>{{end}}
+  {{else}}<p class="muted small">{{if .Empty}}{{t .Empty}}{{else}}{{t "None."}}{{end}}</p>{{end}}
 </div>
 {{end}}
 
@@ -46,19 +46,19 @@
 {{define "opts"}}
 <div class="run-opts" id="{{.ID}}">
   {{if eq .Kind "llm"}}{{$sm := stageModel .Stage}}
-  <label>Provider
+  <label>{{t "Provider"}}
     <select name="provider">
       {{range providers "llm"}}<option value="{{.Name}}" {{if eq .Name $sm.Provider}}selected{{end}}>{{.Name}} ({{.Type}})</option>{{end}}
     </select>
   </label>
-  <label>Model <input name="model" value="{{$sm.Model}}" placeholder="model id"></label>
+  <label>{{t "Model"}} <input name="model" value="{{$sm.Model}}" placeholder="{{t "model id"}}"></label>
   {{else}}{{$ic := imageCfg}}
-  <label>Provider
+  <label>{{t "Provider"}}
     <select name="provider">
       {{range providers "image"}}<option value="{{.Name}}" {{if eq .Name $ic.Provider}}selected{{end}}>{{.Name}}</option>{{end}}
     </select>
   </label>
-  <label>Model <input name="model" value="" placeholder="auto: {{$ic.Model}} / with refs: {{$ic.RefModel}}"></label>
+  <label>{{t "Model"}} <input name="model" value="" placeholder="{{t "auto"}}: {{$ic.Model}} / {{t "with refs"}}: {{$ic.RefModel}}"></label>
   {{end}}
 </div>
 {{end}}
@@ -67,26 +67,26 @@
 {{define "runbtn"}}
 <form method="post" action="/projects/{{.P.ID}}/run/{{.Stage}}" class="inline run-form" data-run data-opts="{{.Opts}}" data-log="{{.Log}}">
   <input type="hidden" name="target" value="{{.Target}}">
-  {{if .Missing}}<label class="check"><input type="checkbox" name="only_missing" value="1">only missing</label>{{end}}
-  <button class="btn {{if .Primary}}primary{{end}}">{{.Label}}</button>
+  {{if .Missing}}<label class="check"><input type="checkbox" name="only_missing" value="1">{{t "only missing"}}</label>{{end}}
+  <button class="btn {{if .Primary}}primary{{end}}">{{t .Label}}</button>
 </form>
 {{end}}
 
 {{/* Status of the last run. Params: P, Stage, Target */}}
 {{define "status"}}
 {{with run .P .Stage .Target}}
-<span class="status {{.Status}}" title="{{.Error}}">
-  {{if eq .Status "running"}}running…{{else if eq .Status "done"}}done{{else}}error{{end}}
+<span class="status {{.Status}}" title="{{t .Error}}">
+  {{if eq .Status "running"}}{{t "running…"}}{{else if eq .Status "done"}}{{t "done"}}{{else}}{{t "error"}}{{end}}
   <span class="muted">{{.When}}{{if .Model}} · {{.Model}}{{end}}</span>
-  {{if eq .Status "error"}}<span class="err-text">{{trunc .Error 160}}</span>{{end}}
+  {{if eq .Status "error"}}<span class="err-text">{{trunc (t .Error) 160}}</span>{{end}}
 </span>
 {{if eq .Status "running"}}
 <form method="post" action="/projects/{{$.P.ID}}/cancel" class="inline">
-  <input type="hidden" name="key" value="{{.Key}}"><button class="link danger">stop</button>
+  <input type="hidden" name="key" value="{{.Key}}"><button class="link danger">{{t "stop"}}</button>
 </form>
 {{end}}
 {{end}}
 {{end}}
 
 {{/* Streaming output panel. Params: ID */}}
-{{define "log"}}<div class="run-log" id="{{.ID}}" hidden><div class="run-log-head"><span class="run-log-state"></span><button type="button" class="link run-log-stop" hidden>stop</button><button type="button" class="link run-log-close">close</button></div><pre></pre></div>{{end}}
+{{define "log"}}<div class="run-log" id="{{.ID}}" hidden><div class="run-log-head"><span class="run-log-state"></span><button type="button" class="link run-log-stop" hidden>{{t "stop"}}</button><button type="button" class="link run-log-close">{{t "close"}}</button></div><pre></pre></div>{{end}}

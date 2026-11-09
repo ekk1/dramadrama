@@ -57,6 +57,10 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 .topbar nav { display: flex; gap: 4px; }
 .topbar nav a { padding: 6px 12px; border-radius: var(--radius); color: var(--muted); }
 .topbar nav a.active, .topbar nav a:hover { background: var(--code-bg); color: var(--text); text-decoration: none; }
+.lang-switch { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; font-size: .8rem; }
+.lang-switch a { padding: 3px 10px; color: var(--muted); }
+.lang-switch a.active { background: var(--accent); color: var(--accent-text); }
+.lang-switch a:hover { text-decoration: none; }
 main { max-width: 1240px; margin: 0 auto; padding: 24px; }
 
 .flash { max-width: 1240px; margin: 12px auto 0; padding: 10px 14px; border-radius: var(--radius); display: flex; justify-content: space-between; gap: 12px; }

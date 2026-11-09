@@ -108,6 +108,7 @@ func (s *Server) routes() {
 
 	m.HandleFunc("GET /settings", s.handleSettings)
 	m.HandleFunc("POST /settings", s.handleSaveSettings)
+	m.HandleFunc("GET /lang/{lang}", s.handleLang)
 	m.HandleFunc("GET /prompts", s.handlePrompts)
 	m.HandleFunc("POST /prompts/{name}", s.handleSavePrompt)
 	m.HandleFunc("POST /prompts/{name}/reset", s.handleResetPrompt)
@@ -119,7 +120,7 @@ func (s *Server) routes() {
 // through the user's browser) and dispatches.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
-		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		http.Error(w, translator(langOf(r))("cross-origin request rejected"), http.StatusForbidden)
 		return
 	}
 	s.mux.ServeHTTP(w, r)
@@ -149,6 +150,9 @@ type view struct {
 	Nav   string
 	Err   string
 	Msg   string
+	Lang  string
+	Path  string            // current path + query, for the language switch
+	JS    map[string]string // translated strings for app.js
 	D     any
 }
 
@@ -173,8 +177,19 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v v
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	v.Err = r.URL.Query().Get("err")
-	v.Msg = r.URL.Query().Get("msg")
+	// Bind the request's language: templates call {{t "English text"}}.
+	lang := langOf(r)
+	tr := translator(lang)
+	t, err = t.Clone()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	t.Funcs(template.FuncMap{"t": tr})
+	v.Lang, v.JS, v.Path = lang, jsStrings(tr), r.URL.RequestURI()
+	v.Title = tr(v.Title)
+	v.Err = tr(r.URL.Query().Get("err"))
+	v.Msg = tr(r.URL.Query().Get("msg"))
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", v); err != nil {
 		log.Printf("render %s: %v", name, err)
@@ -232,6 +247,7 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return ids[len(ids)-1]
 		},
+		"t":       func(s string) string { return s }, // replaced per request in render
 		"join":    strings.Join,
 		"time":    fmtTime,
 		"size":    fmtSize,
@@ -324,4 +340,18 @@ func done(w http.ResponseWriter, r *http.Request, def string, err error) {
 		target = withQuery(target, "err", err.Error())
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// handleLang stores the interface language in a cookie and goes back.
+func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
+	lang := r.PathValue("lang")
+	if lang != LangEN && lang != LangZH {
+		http.NotFound(w, r)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: langCookie, Value: lang, Path: "/", MaxAge: 365 * 24 * 3600,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, back(r, "/projects"), http.StatusSeeOther)
 }
