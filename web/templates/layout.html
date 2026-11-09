@@ -1,41 +1,46 @@
 {{define "layout"}}<!doctype html>
-<html lang="en">
+<html lang="{{if eq .Lang "zh"}}zh-CN{{else}}en{{end}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · dramadrama</title>
 <link rel="stylesheet" href="/static/app.css">
+<script>window.I18N = {{.JS}};</script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="/projects">dramadrama</a>
   <nav>
-    <a href="/projects" {{if eq .Nav "projects"}}class="active"{{end}}>Projects</a>
-    <a href="/assets" {{if eq .Nav "assets"}}class="active"{{end}}>Asset library</a>
-    <a href="/prompts" {{if eq .Nav "prompts"}}class="active"{{end}}>Prompts</a>
-    <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>Settings</a>
+    <a href="/projects" {{if eq .Nav "projects"}}class="active"{{end}}>{{t "Projects"}}</a>
+    <a href="/assets" {{if eq .Nav "assets"}}class="active"{{end}}>{{t "Asset library"}}</a>
+    <a href="/prompts" {{if eq .Nav "prompts"}}class="active"{{end}}>{{t "Prompts"}}</a>
+    <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>{{t "Settings"}}</a>
   </nav>
+  <div class="lang-switch" role="group" aria-label="{{t "Language"}}">
+    <a href="/lang/zh?back={{.Path}}" {{if eq .Lang "zh"}}class="active" aria-current="true"{{end}} lang="zh-CN">中文</a>
+    <a href="/lang/en?back={{.Path}}" {{if eq .Lang "en"}}class="active" aria-current="true"{{end}} lang="en">EN</a>
+  </div>
 </header>
-{{if .Err}}<div class="flash error" role="alert">{{.Err}}<button type="button" class="flash-close" aria-label="Dismiss">×</button></div>{{end}}
-{{if .Msg}}<div class="flash ok" role="status">{{.Msg}}<button type="button" class="flash-close" aria-label="Dismiss">×</button></div>{{end}}
+{{if .Err}}<div class="flash error" role="alert">{{.Err}}<button type="button" class="flash-close" aria-label="{{t "Dismiss"}}">×</button></div>{{end}}
+{{if .Msg}}<div class="flash ok" role="status">{{.Msg}}<button type="button" class="flash-close" aria-label="{{t "Dismiss"}}">×</button></div>{{end}}
 <main>
 {{template "content" .}}
 </main>
 
 <dialog id="picker">
   <form method="dialog" class="picker-head">
-    <strong>Pick from asset library</strong>
-    <select id="picker-scope" aria-label="Scope">
-      <option value="project">This project</option>
-      <option value="">All projects</option>
+    <strong>{{t "Pick from asset library"}}</strong>
+    <select id="picker-scope" aria-label="{{t "Project"}}">
+      <option value="project">{{t "This project"}}</option>
+      <option value="">{{t "All projects"}}</option>
     </select>
-    <select id="picker-kind" aria-label="Kind">
-      <option value="">Any kind</option>
-      {{range kinds}}<option value="{{.}}">{{.}}</option>{{end}}
+    <select id="picker-kind" aria-label="{{t "Kind"}}">
+      <option value="">{{t "Any kind"}}</option>
+      {{range kinds}}<option value="{{.}}">{{t (printf "%s" .)}}</option>{{end}}
     </select>
-    <input id="picker-q" type="search" placeholder="Search name, prompt, tag" aria-label="Search">
-    <button value="cancel">Close</button>
+    <input id="picker-q" type="search" placeholder="{{t "Search name, prompt, tag"}}" aria-label="{{t "Search name, prompt, tag"}}">
+    <button value="cancel">{{t "Close"}}</button>
   </form>
   <div id="picker-grid" class="picker-grid"></div>
 </dialog>

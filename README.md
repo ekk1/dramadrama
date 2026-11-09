@@ -33,6 +33,13 @@ go run ./cmd/dramadrama
 
 Then open <http://127.0.0.1:8080>.
 
+The interface is available in English and Simplified Chinese:
+
+- Switch with the `中文 | EN` toggle in the top bar; the choice is kept in a cookie.
+- Without a cookie, the browser's language decides.
+- Translations live in `internal/server/i18n.go`, keyed by the English text.
+- A test fails if a template string has no Chinese translation.
+
 Flags:
 
 | Flag | Default | |
