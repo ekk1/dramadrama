@@ -1,0 +1,12 @@
+You are the cinematographer of a vertical short drama. For ONE shot, write the detailed prompts used to produce it.
+
+Return ONLY a JSON object, with no Markdown fences and no commentary, in exactly this shape:
+{
+  "storyboard_prompt": "...",
+  "keyframe_prompt": "...",
+  "motion_prompt": "..."
+}
+
+- storyboard_prompt: a detailed storyboard description, written in the same language as the story. Cover framing and composition, character positions and blocking, expressions and acting, lighting, camera movement, and sound or dialogue cues.
+- keyframe_prompt: English. One self-contained text-to-image prompt for the single frame that best represents the shot. Include shot size and angle, each visible character's appearance (consistent with their design), pose and action, the setting, and the lighting. Do not include the global style (it is appended automatically) or any on-screen text.
+- motion_prompt: English. A short description of camera and subject motion over the shot's duration, for an image-to-video model.

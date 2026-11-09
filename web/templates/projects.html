@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1>Projects</h1>
+<section class="stage">
+  <h2>New project</h2>
+  <form method="post" action="/projects" class="grid-form">
+    <label>Name <input name="name" placeholder="Untitled"></label>
+    <label class="wide">Core idea <textarea name="idea" rows="3" placeholder="What is the drama about?"></textarea></label>
+    <div class="wide actions"><button class="btn primary">Create</button></div>
+  </form>
+</section>
+<div class="project-list">
+{{range .D}}
+  <a class="project-card" href="/projects/{{.ID}}">
+    <div class="pc-thumb">{{if .Thumb}}<img src="/assets/{{.Thumb}}/file" alt="" loading="lazy">{{end}}</div>
+    <div class="pc-body">
+      <strong>{{.Name}}</strong>
+      <p class="muted small">{{trunc .Idea 140}}</p>
+      <p class="pc-progress small">
+        <span class="{{if .Story}}ok{{end}}">story</span>
+        <span class="{{if .Visuals}}ok{{end}}">{{len .Visuals}} visuals</span>
+        <span class="{{if .Shots}}ok{{end}}">{{len .Shots}} shots</span>
+        <span class="{{if .Keyframes}}ok{{end}}">{{.Keyframes}} keyframes</span>
+      </p>
+      <p class="muted small">Updated {{time .UpdatedAt}}</p>
+    </div>
+  </a>
+{{else}}
+  <p class="muted">No projects yet.</p>
+{{end}}
+</div>
+{{end}}

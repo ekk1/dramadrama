@@ -1,0 +1,246 @@
+{{define "content"}}{{$p := .D}}{{$base := printf "/projects/%s" $p.ID}}
+<div class="project-head">
+  <div>
+    <a class="muted small" href="/projects">← Projects</a>
+    <h1>{{$p.Name}}</h1>
+  </div>
+  <nav class="stage-nav" aria-label="Steps">
+    <a href="#s1">1 Input</a><a href="#s2">2 Story</a><a href="#s3">3 Visuals</a>
+    <a href="#s4">4 Storyboard</a><a href="#s5">5 Shot prompts</a><a href="#s6">6 Keyframes</a>
+  </nav>
+</div>
+
+{{/* ------------------------------------------------------------------ 1 */}}
+<section class="stage" id="s1">
+  <h2><span class="num">1</span> Input</h2>
+  <form method="post" action="{{$base}}/input" class="grid-form">
+    <input type="hidden" name="back" value="{{$base}}#s1">
+    <label>Project name <input name="name" value="{{$p.Name}}"></label>
+    <label>Aspect ratio
+      <select name="aspect_ratio">{{range aspects}}<option {{if eq . $p.AspectRatio}}selected{{end}}>{{.}}</option>{{end}}</select>
+    </label>
+    <label class="wide">Core idea
+      <textarea name="idea" rows="4" placeholder="Describe the concept in a few sentences…">{{$p.Idea}}</textarea>
+    </label>
+    <label class="wide">Requirements <span class="muted">(optional: episode length, number of shots, tone, audience, …)</span>
+      <textarea name="requirements" rows="2">{{$p.Requirements}}</textarea>
+    </label>
+    <div class="wide actions"><button class="btn primary">Save input</button></div>
+  </form>
+  {{template "refs" dict "P" $p "Target" "project" "IDs" $p.ReferenceIDs "Label" "Style reference images" "Primary" false "Back" (printf "%s#s1" $base) "Empty" "No reference images yet. They are sent to vision models in step 3 (configurable in Settings) and can be attached to any image generation."}}
+</section>
+
+{{/* ------------------------------------------------------------------ 2 */}}
+<section class="stage" id="s2">
+  <h2><span class="num">2</span> Idea expansion {{template "status" dict "P" $p "Stage" "idea" "Target" ""}}</h2>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-idea" "Kind" "llm" "Stage" "idea"}}
+    {{template "runbtn" dict "P" $p "Stage" "idea" "Target" "" "Label" "Expand idea" "Opts" "opts-idea" "Log" "log-idea" "Primary" true}}
+  </div>
+  {{template "log" dict "ID" "log-idea"}}
+  <form method="post" action="{{$base}}/story">
+    <input type="hidden" name="back" value="{{$base}}#s2">
+    <label>Story <span class="muted">(editable; later steps read this text)</span>
+      <textarea name="story" rows="16" class="mono-ish">{{$p.Story}}</textarea>
+    </label>
+    <div class="actions"><button class="btn">Save story</button></div>
+  </form>
+</section>
+
+{{/* ------------------------------------------------------------------ 3 */}}
+<section class="stage" id="s3">
+  <h2><span class="num">3</span> Visual development</h2>
+
+  <h3>3a · Visual prompts {{template "status" dict "P" $p "Stage" "visual_prompts" "Target" ""}}</h3>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-vp" "Kind" "llm" "Stage" "visual_prompts"}}
+    {{template "runbtn" dict "P" $p "Stage" "visual_prompts" "Target" "" "Label" "Generate visual prompts" "Opts" "opts-vp" "Log" "log-vp" "Primary" true}}
+  </div>
+  <p class="muted small">Re-running replaces the list. Items with the same kind and name keep their images.</p>
+  {{template "log" dict "ID" "log-vp"}}
+  {{if $p.VisualsRaw}}
+  <form method="post" action="{{$base}}/apply/visuals" class="raw-fix">
+    <input type="hidden" name="back" value="{{$base}}#s3">
+    <p class="err-text">The last output could not be parsed as JSON. Fix it below and apply.</p>
+    <textarea name="raw" rows="10" class="mono">{{$p.VisualsRaw}}</textarea>
+    <button class="btn">Apply JSON</button>
+  </form>
+  {{end}}
+
+  <form method="post" action="{{$base}}/style">
+    <input type="hidden" name="back" value="{{$base}}#s3">
+    <label>Global style <span class="muted">(appended to every image prompt)</span>
+      <textarea name="style" rows="2">{{$p.Style}}</textarea>
+    </label>
+    <div class="actions"><button class="btn">Save style</button></div>
+  </form>
+
+  <h3>3b · Concept images {{template "status" dict "P" $p "Stage" "visual_images" "Target" "all"}}</h3>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-vi" "Kind" "image"}}
+    {{template "runbtn" dict "P" $p "Stage" "visual_images" "Target" "all" "Label" "Generate all images" "Opts" "opts-vi" "Log" "log-vi" "Primary" true "Missing" true}}
+  </div>
+  {{template "log" dict "ID" "log-vi"}}
+
+  <div class="cards">
+  {{range $p.Visuals}}{{$v := .}}{{$anchor := printf "%s#v-%s" $base .ID}}
+    <article class="card" id="v-{{.ID}}">
+      <form method="post" action="{{$base}}/visuals/{{.ID}}" class="grid-form">
+        <input type="hidden" name="back" value="{{$anchor}}">
+        <label>Kind
+          <select name="kind">{{range visualKinds}}<option {{if eq . $v.Kind}}selected{{end}}>{{.}}</option>{{end}}</select>
+        </label>
+        <label>Name <input name="name" value="{{.Name}}"></label>
+        <label class="wide">Description <textarea name="description" rows="2">{{.Description}}</textarea></label>
+        <label class="wide">Image prompt <textarea name="prompt" rows="4">{{.Prompt}}</textarea></label>
+        <div class="wide actions">
+          <button class="btn">Save</button>
+        </div>
+      </form>
+      <div class="card-actions">
+        {{template "runbtn" dict "P" $p "Stage" "visual_images" "Target" .ID "Label" "Generate image" "Opts" "opts-vi" "Log" "log-vi" "Primary" true}}
+        {{template "status" dict "P" $p "Stage" "visual_images" "Target" .ID}}
+        <form method="post" action="{{$base}}/visuals/{{.ID}}/delete" class="inline push-right" data-confirm="Delete this item? Its images stay in the library.">
+          <input type="hidden" name="back" value="{{$base}}#s3"><button class="link danger">delete item</button>
+        </form>
+      </div>
+      {{template "refs" dict "P" $p "Target" (printf "visual-out:%s" .ID) "IDs" .AssetIDs "Label" "Generated images" "Primary" true "Back" $anchor "Empty" "Not generated yet."}}
+      {{template "refs" dict "P" $p "Target" (printf "visual:%s" .ID) "IDs" .ReferenceIDs "Label" "Conditioning references" "Primary" false "Back" $anchor "Empty" "None: text-to-image model is used."}}
+    </article>
+  {{else}}
+    <p class="muted">No visual items yet. Generate them from the story or add them by hand.</p>
+  {{end}}
+  </div>
+  <form method="post" action="{{$base}}/visuals" class="inline">
+    <input type="hidden" name="back" value="{{$base}}#s3">
+    <select name="kind">{{range visualKinds}}<option>{{.}}</option>{{end}}</select>
+    <button class="btn">+ Add item</button>
+  </form>
+</section>
+
+{{/* ------------------------------------------------------------------ 4 */}}
+<section class="stage" id="s4">
+  <h2><span class="num">4</span> Storyboard overview {{template "status" dict "P" $p "Stage" "storyboard" "Target" ""}}</h2>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-sb" "Kind" "llm" "Stage" "storyboard"}}
+    {{template "runbtn" dict "P" $p "Stage" "storyboard" "Target" "" "Label" "Generate shot list" "Opts" "opts-sb" "Log" "log-sb" "Primary" true}}
+  </div>
+  <p class="muted small">Re-running replaces all shots (and their links to prompts and keyframes; the images stay in the library).</p>
+  {{template "log" dict "ID" "log-sb"}}
+  {{if $p.StoryboardRaw}}
+  <form method="post" action="{{$base}}/apply/storyboard" class="raw-fix">
+    <input type="hidden" name="back" value="{{$base}}#s4">
+    <p class="err-text">The last output could not be parsed as JSON. Fix it below and apply.</p>
+    <textarea name="raw" rows="10" class="mono">{{$p.StoryboardRaw}}</textarea>
+    <button class="btn">Apply JSON</button>
+  </form>
+  {{end}}
+
+  <div class="shots">
+  {{range $p.Shots}}{{$anchor := printf "%s#shot-%s" $base .ID}}
+    <article class="shot" id="shot-{{.ID}}">
+      <div class="shot-num">#{{.Number}}</div>
+      <form method="post" action="{{$base}}/shots/{{.ID}}" class="shot-form">
+        <input type="hidden" name="back" value="{{$anchor}}">
+        <label>Scene <input name="scene" value="{{.Scene}}"></label>
+        <label>Characters <input name="characters" value="{{join .Characters ", "}}" placeholder="comma separated"></label>
+        <label>Camera <input name="camera" value="{{.Camera}}"></label>
+        <label class="narrow">Seconds <input name="duration" value="{{.Duration}}" inputmode="decimal"></label>
+        <label class="wide">Action <textarea name="action" rows="2">{{.Action}}</textarea></label>
+        <label class="wide">Dialogue <textarea name="dialogue" rows="1">{{.Dialogue}}</textarea></label>
+        <div class="wide actions"><button class="btn small">Save</button></div>
+      </form>
+      <div class="shot-tools">
+        <form method="post" action="{{$base}}/shots/{{.ID}}/move" class="inline"><input type="hidden" name="dir" value="up"><input type="hidden" name="back" value="{{$anchor}}"><button class="link" title="Move up">↑</button></form>
+        <form method="post" action="{{$base}}/shots/{{.ID}}/move" class="inline"><input type="hidden" name="dir" value="down"><input type="hidden" name="back" value="{{$anchor}}"><button class="link" title="Move down">↓</button></form>
+        <form method="post" action="{{$base}}/shots" class="inline"><input type="hidden" name="after" value="{{.ID}}"><input type="hidden" name="back" value="{{$base}}#s4"><button class="link" title="Insert a shot after this one">+ after</button></form>
+        <form method="post" action="{{$base}}/shots/{{.ID}}/delete" class="inline" data-confirm="Delete shot #{{.Number}}?"><input type="hidden" name="back" value="{{$base}}#s4"><button class="link danger">delete</button></form>
+      </div>
+    </article>
+  {{else}}
+    <p class="muted">No shots yet.</p>
+  {{end}}
+  </div>
+  <form method="post" action="{{$base}}/shots" class="inline">
+    <input type="hidden" name="back" value="{{$base}}#s4"><button class="btn">+ Add shot</button>
+  </form>
+</section>
+
+{{/* ------------------------------------------------------------------ 5 */}}
+<section class="stage" id="s5">
+  <h2><span class="num">5</span> Shot-level prompts {{template "status" dict "P" $p "Stage" "shot_prompts" "Target" "all"}}</h2>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-sp" "Kind" "llm" "Stage" "shot_prompts"}}
+    {{template "runbtn" dict "P" $p "Stage" "shot_prompts" "Target" "all" "Label" "Generate for all shots" "Opts" "opts-sp" "Log" "log-sp" "Primary" true "Missing" true}}
+  </div>
+  {{template "log" dict "ID" "log-sp"}}
+  <div class="shots">
+  {{range $p.Shots}}{{$anchor := printf "sp-%s" .ID}}
+    <article class="card" id="sp-{{.ID}}">
+      <header class="card-head">
+        <strong>#{{.Number}}</strong> <span class="muted">{{.Scene}}</span> — {{trunc .Action 120}}
+      </header>
+      <form method="post" action="{{$base}}/shots/{{.ID}}" class="grid-form">
+        <input type="hidden" name="back" value="{{$base}}#{{$anchor}}">
+        <label class="wide">Storyboard description <textarea name="storyboard_prompt" rows="4">{{.StoryboardPrompt}}</textarea></label>
+        <label class="wide">Keyframe prompt <span class="muted">(English, used for image generation)</span><textarea name="keyframe_prompt" rows="3">{{.KeyframePrompt}}</textarea></label>
+        <label class="wide">Motion prompt <span class="muted">(for image-to-video later)</span><textarea name="motion_prompt" rows="1">{{.MotionPrompt}}</textarea></label>
+        <div class="wide actions"><button class="btn small">Save</button></div>
+      </form>
+      <div class="card-actions">
+        {{template "runbtn" dict "P" $p "Stage" "shot_prompts" "Target" .ID "Label" "Generate prompts" "Opts" "opts-sp" "Log" "log-sp"}}
+        {{template "status" dict "P" $p "Stage" "shot_prompts" "Target" .ID}}
+      </div>
+    </article>
+  {{else}}
+    <p class="muted">Create the storyboard first.</p>
+  {{end}}
+  </div>
+</section>
+
+{{/* ------------------------------------------------------------------ 6 */}}
+<section class="stage" id="s6">
+  <h2><span class="num">6</span> Keyframes {{template "status" dict "P" $p "Stage" "keyframes" "Target" "all"}}</h2>
+  <div class="runbar">
+    {{template "opts" dict "ID" "opts-kf" "Kind" "image"}}
+    {{template "runbtn" dict "P" $p "Stage" "keyframes" "Target" "all" "Label" "Generate all keyframes" "Opts" "opts-kf" "Log" "log-kf" "Primary" true "Missing" true}}
+  </div>
+  {{template "log" dict "ID" "log-kf"}}
+  <div class="shots">
+  {{range $p.Shots}}{{$sh := .}}{{$anchor := printf "%s#kf-%s" $base .ID}}{{$refs := shotRefs $p $sh}}
+    <article class="card" id="kf-{{.ID}}">
+      <header class="card-head">
+        <strong>#{{.Number}}</strong> <span class="muted">{{.Duration}}s · {{.Camera}}</span>
+      </header>
+      <p class="prompt-preview">{{if .KeyframePrompt}}{{.KeyframePrompt}}{{else}}<span class="muted">No keyframe prompt yet: run step 5.</span>{{end}}</p>
+      <div class="card-actions">
+        {{template "runbtn" dict "P" $p "Stage" "keyframes" "Target" .ID "Label" "Generate keyframe" "Opts" "opts-kf" "Log" "log-kf" "Primary" true}}
+        {{template "status" dict "P" $p "Stage" "keyframes" "Target" .ID}}
+      </div>
+      <div class="kf-grid">
+        {{template "refs" dict "P" $p "Target" (printf "keyframe:%s" .ID) "IDs" .KeyframeIDs "Label" "Keyframes" "Primary" true "Back" $anchor "Empty" "Not generated yet."}}
+        <div>
+          {{template "refs" dict "P" $p "Target" (printf "shot:%s" .ID) "IDs" .ReferenceIDs "Label" "Conditioning references" "Primary" false "Back" $anchor "Empty" ""}}
+          {{if index $refs "Auto"}}
+            {{$ids := index $refs "IDs"}}
+            {{if $ids}}
+            <div class="auto-refs"><span class="muted small">Auto-selected from concept images (add references to override):</span>
+              <div class="thumbs mini">{{range $ids}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{end}}{{end}}</div>
+            </div>
+            {{else}}<p class="muted small">No matching concept images: text-to-image model is used.</p>{{end}}
+          {{end}}
+        </div>
+      </div>
+    </article>
+  {{else}}
+    <p class="muted">Create the storyboard first.</p>
+  {{end}}
+  </div>
+</section>
+
+<section class="stage danger-zone">
+  <form method="post" action="{{$base}}/delete" data-confirm="Delete this project? Its assets stay in the library.">
+    <button class="btn danger">Delete project</button>
+  </form>
+</section>
+{{end}}

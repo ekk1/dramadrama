@@ -1,0 +1,92 @@
+{{/* A strip of asset thumbnails bound to one reference list, with
+     remove / make-primary actions and add-from-library / upload controls.
+     Params: P (project), Target, IDs, Label, Primary (bool), Back, Empty */}}
+{{define "refs"}}
+<div class="refs">
+  <div class="refs-head">
+    <span class="label">{{.Label}}</span>
+    <button type="button" class="btn small" data-pick data-action="/projects/{{.P.ID}}/refs" data-target="{{.Target}}" data-back="{{.Back}}">+ From library</button>
+    <form method="post" action="/projects/{{.P.ID}}/upload" enctype="multipart/form-data" class="inline">
+      <input type="hidden" name="target" value="{{.Target}}">
+      <input type="hidden" name="back" value="{{.Back}}">
+      <label class="btn small">Upload<input type="file" name="files" accept="image/*" multiple data-autosubmit hidden></label>
+    </form>
+  </div>
+  {{$ctx := .}}
+  {{$primary := last .IDs}}
+  {{if .IDs}}
+  <div class="thumbs">
+    {{range .IDs}}{{with asset .}}
+    <figure class="thumb {{if and $ctx.Primary (eq .ID $primary)}}primary{{end}}">
+      <a href="/assets/{{.ID}}/file" target="_blank" rel="noopener">
+        {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
+      </a>
+      <figcaption>
+        {{if and $ctx.Primary (eq .ID $primary)}}<span class="tag">in use</span>{{end}}
+        {{if and $ctx.Primary (ne .ID $primary)}}
+        <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
+          <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
+          <input type="hidden" name="op" value="primary"><input type="hidden" name="back" value="{{$ctx.Back}}">
+          <button class="link" title="Use this image downstream">use</button>
+        </form>{{end}}
+        <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
+          <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
+          <input type="hidden" name="op" value="remove"><input type="hidden" name="back" value="{{$ctx.Back}}">
+          <button class="link danger" title="Unlink (the asset stays in the library)">unlink</button>
+        </form>
+      </figcaption>
+    </figure>
+    {{end}}{{end}}
+  </div>
+  {{else}}<p class="muted small">{{if .Empty}}{{.Empty}}{{else}}None.{{end}}</p>{{end}}
+</div>
+{{end}}
+
+{{/* Provider/model options for a group of run buttons. Params: ID, Kind ("llm"|"image"), Stage */}}
+{{define "opts"}}
+<div class="run-opts" id="{{.ID}}">
+  {{if eq .Kind "llm"}}{{$sm := stageModel .Stage}}
+  <label>Provider
+    <select name="provider">
+      {{range providers "llm"}}<option value="{{.Name}}" {{if eq .Name $sm.Provider}}selected{{end}}>{{.Name}} ({{.Type}})</option>{{end}}
+    </select>
+  </label>
+  <label>Model <input name="model" value="{{$sm.Model}}" placeholder="model id"></label>
+  {{else}}{{$ic := imageCfg}}
+  <label>Provider
+    <select name="provider">
+      {{range providers "image"}}<option value="{{.Name}}" {{if eq .Name $ic.Provider}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </label>
+  <label>Model <input name="model" value="" placeholder="auto: {{$ic.Model}} / with refs: {{$ic.RefModel}}"></label>
+  {{end}}
+</div>
+{{end}}
+
+{{/* A button that runs a step. Params: P, Stage, Target, Label, Opts (options container id), Log (log element id), Primary, Missing (show only-missing box) */}}
+{{define "runbtn"}}
+<form method="post" action="/projects/{{.P.ID}}/run/{{.Stage}}" class="inline run-form" data-run data-opts="{{.Opts}}" data-log="{{.Log}}">
+  <input type="hidden" name="target" value="{{.Target}}">
+  {{if .Missing}}<label class="check"><input type="checkbox" name="only_missing" value="1">only missing</label>{{end}}
+  <button class="btn {{if .Primary}}primary{{end}}">{{.Label}}</button>
+</form>
+{{end}}
+
+{{/* Status of the last run. Params: P, Stage, Target */}}
+{{define "status"}}
+{{with run .P .Stage .Target}}
+<span class="status {{.Status}}" title="{{.Error}}">
+  {{if eq .Status "running"}}running…{{else if eq .Status "done"}}done{{else}}error{{end}}
+  <span class="muted">{{.When}}{{if .Model}} · {{.Model}}{{end}}</span>
+  {{if eq .Status "error"}}<span class="err-text">{{trunc .Error 160}}</span>{{end}}
+</span>
+{{if eq .Status "running"}}
+<form method="post" action="/projects/{{$.P.ID}}/cancel" class="inline">
+  <input type="hidden" name="key" value="{{.Key}}"><button class="link danger">stop</button>
+</form>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* Streaming output panel. Params: ID */}}
+{{define "log"}}<div class="run-log" id="{{.ID}}" hidden><div class="run-log-head"><span class="run-log-state"></span><button type="button" class="link run-log-stop" hidden>stop</button><button type="button" class="link run-log-close">close</button></div><pre></pre></div>{{end}}

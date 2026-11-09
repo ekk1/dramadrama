@@ -1,0 +1,80 @@
+{{define "content"}}{{$d := .D}}
+<h1>Settings</h1>
+<form method="post" action="/settings">
+<section class="stage">
+  <h2>Providers</h2>
+  <p class="muted small">API keys can be stored in the config file or read from an environment variable. Stored keys are never shown again; leave the field empty to keep the current key.</p>
+  <div class="provider-list">
+  {{range $d.Providers}}
+    <fieldset class="provider">
+      <input type="hidden" name="p_orig" value="{{.Name}}">
+      <label>Name <input name="p_name" value="{{.Name}}" required></label>
+      <label>Type
+        <select name="p_type">{{$t := .Type}}
+          <optgroup label="LLM">{{range llmTypes}}<option {{if eq . $t}}selected{{end}}>{{.}}</option>{{end}}</optgroup>
+          <optgroup label="Image">{{range imageTypes}}<option {{if eq . $t}}selected{{end}}>{{.}}</option>{{end}}</optgroup>
+        </select>
+      </label>
+      <label class="wide">Base URL <input name="p_base_url" value="{{.BaseURL}}" placeholder="provider default"></label>
+      <label>API key <input type="password" name="p_key" autocomplete="off" placeholder="{{if .KeySet}}•••• stored{{else}}not stored{{end}}"></label>
+      <label>…or env var <input name="p_key_env" value="{{.APIKeyEnv}}" placeholder="e.g. OPENAI_API_KEY">
+        {{if .APIKeyEnv}}<span class="small {{if .EnvSet}}ok-text{{else}}err-text{{end}}">{{if .EnvSet}}set{{else}}not set{{end}}</span>{{end}}</label>
+      <label class="wide">Extra headers <span class="muted">(one "Name: value" per line)</span><textarea name="p_headers" rows="1">{{.Headers}}</textarea></label>
+      <div class="wide checks">
+        {{if .KeySet}}<label class="check"><input type="checkbox" name="p_key_clear" value="{{.Index}}"> clear stored key</label>{{end}}
+        <label class="check"><input type="checkbox" name="p_delete" value="{{.Index}}"> delete provider</label>
+      </div>
+    </fieldset>
+  {{end}}
+    <fieldset class="provider new">
+      <legend>Add provider</legend>
+      <input type="hidden" name="p_orig" value="">
+      <label>Name <input name="p_name" value="" placeholder="e.g. deepseek"></label>
+      <label>Type
+        <select name="p_type">
+          <optgroup label="LLM">{{range llmTypes}}<option>{{.}}</option>{{end}}</optgroup>
+          <optgroup label="Image">{{range imageTypes}}<option>{{.}}</option>{{end}}</optgroup>
+        </select>
+      </label>
+      <label class="wide">Base URL <input name="p_base_url" placeholder="e.g. https://api.deepseek.com/v1"></label>
+      <label>API key <input type="password" name="p_key" autocomplete="off"></label>
+      <label>…or env var <input name="p_key_env"></label>
+      <label class="wide">Extra headers <textarea name="p_headers" rows="1"></textarea></label>
+    </fieldset>
+  </div>
+</section>
+
+<section class="stage">
+  <h2>Default model per step</h2>
+  <p class="muted small">Each run can override provider and model on the project page. Temperature is optional and ignored by Anthropic.</p>
+  <table class="settings-table">
+    <thead><tr><th>Step</th><th>Provider</th><th>Model</th><th>Temperature</th><th>Max tokens</th><th>Send reference images</th></tr></thead>
+    <tbody>
+    {{range llmStages}}{{$st := .}}{{$sm := index $d.Stages .}}
+      <tr>
+        <td>{{.}}</td>
+        <td><select name="st_{{.}}_provider"><option value="">(none)</option>{{range providers "llm"}}<option {{if eq .Name $sm.Provider}}selected{{end}}>{{.Name}}</option>{{end}}</select></td>
+        <td><input name="st_{{.}}_model" value="{{$sm.Model}}"></td>
+        <td><input name="st_{{.}}_temperature" value="{{with $sm.Temperature}}{{.}}{{end}}" size="4" inputmode="decimal"></td>
+        <td><input name="st_{{.}}_max_tokens" value="{{if $sm.MaxTokens}}{{$sm.MaxTokens}}{{end}}" size="6" inputmode="numeric"></td>
+        <td><input type="checkbox" name="st_{{.}}_send_images" value="1" {{if $sm.SendImages}}checked{{end}} aria-label="send reference images for {{$st}}"></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+
+<section class="stage">
+  <h2>Image generation</h2>
+  <div class="grid-form">
+    <label>Provider <select name="img_provider"><option value="">(none)</option>{{range providers "image"}}<option {{if eq .Name $d.Image.Provider}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <label>Default aspect ratio <select name="img_aspect">{{range aspects}}<option {{if eq . $d.Image.AspectRatio}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label>Text-to-image model <input name="img_model" value="{{$d.Image.Model}}" placeholder="fal-ai/flux/dev"></label>
+    <label>Model with reference images <input name="img_ref_model" value="{{$d.Image.RefModel}}" placeholder="fal-ai/flux-pro/kontext"></label>
+    <label class="wide">Extra parameters <span class="muted">(JSON object merged into every request, e.g. {"num_inference_steps": 28})</span>
+      <textarea name="img_extra" rows="3" class="mono">{{$d.Extra}}</textarea></label>
+  </div>
+</section>
+<div class="actions sticky-save"><button class="btn primary">Save settings</button></div>
+</form>
+{{end}}

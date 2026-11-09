@@ -1,0 +1,16 @@
+{{define "content"}}{{$d := .D}}
+<h1>Prompt templates</h1>
+<p class="muted">These Go <code>text/template</code> files build every LLM request. Edits are saved as overrides in <code>{{$d.Dir}}</code> and take effect on the next run. Available data: <code>.P</code> (project: Idea, Requirements, Story, Style, Visuals, Shots, AspectRatio), <code>.Shot</code>, <code>.Prev</code>, <code>.Next</code>, <code>.ImageCount</code>; function <code>join</code>.</p>
+{{range $d.List}}
+<section class="stage" id="p-{{.Name}}">
+  <h2>{{.Name}} {{if .Overridden}}<span class="tag">customised</span>{{end}}</h2>
+  <form method="post" action="/prompts/{{.Name}}">
+    <textarea name="source" rows="12" class="mono">{{.Source}}</textarea>
+    <div class="actions">
+      <button class="btn">Save</button>
+      {{if .Overridden}}<button class="link danger" formaction="/prompts/{{.Name}}/reset">reset to default</button>{{end}}
+    </div>
+  </form>
+</section>
+{{end}}
+{{end}}
