@@ -72,6 +72,8 @@ func (f *fakeImage) Generate(ctx context.Context, req *imagegen.Request) (*image
 func newTestService(t *testing.T) (*Service, *fakeLLM, *fakeImage) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "test") // providers are faked
+	t.Setenv("FAL_KEY", "test")
 	cfg, err := config.Load(filepath.Join(dir, "config.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +214,7 @@ func TestPreconditionsAndBusy(t *testing.T) {
 	if got.Runs[project.StageIdea].Status != "error" {
 		t.Errorf("error not recorded: %+v", got.Runs)
 	}
-	s.acquire(p.ID + "/" + project.StageIdea)
+	s.acquire(p.ID+"/"+project.StageIdea, func() {})
 	if err := s.Run(context.Background(), RunRequest{ProjectID: p.ID, Stage: project.StageIdea}, nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("want ErrBusy, got %v", err)
 	}
@@ -241,5 +243,15 @@ func TestPromptOverride(t *testing.T) {
 	out, _ = pr.Render("idea.user", promptData{P: &project.Project{Idea: "X"}})
 	if out != "custom X" {
 		t.Errorf("override not used: %q", out)
+	}
+}
+
+func TestMissingKey(t *testing.T) {
+	s, _, _ := newTestService(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	p, _ := s.Projects.Create("x", "idea")
+	err := s.Run(context.Background(), RunRequest{ProjectID: p.ID, Stage: project.StageIdea}, nil)
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+		t.Errorf("want missing key error, got %v", err)
 	}
 }

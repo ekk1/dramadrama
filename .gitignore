@@ -31,3 +31,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Workbench data (projects, assets, config with API keys)
+/data/
+/dramadrama

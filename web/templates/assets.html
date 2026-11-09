@@ -1,0 +1,74 @@
+{{define "content"}}{{$d := .D}}
+<h1>Asset library</h1>
+<section class="stage">
+  <form method="get" action="/assets" class="filters">
+    <select name="project" aria-label="Project">
+      <option value="">All projects</option>
+      {{range $id, $name := $d.Projects}}<option value="{{$id}}" {{if eq $id $d.F.ProjectID}}selected{{end}}>{{$name}}</option>{{end}}
+    </select>
+    <select name="kind" aria-label="Kind">
+      <option value="">Any kind</option>
+      {{range kinds}}<option value="{{.}}" {{if eq (printf "%s" .) (printf "%s" $d.F.Kind)}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <select name="tag" aria-label="Tag">
+      <option value="">Any tag</option>
+      {{range $d.Tags}}<option {{if eq . $d.F.Tag}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <input type="search" name="q" value="{{$d.F.Query}}" placeholder="Search name, prompt, tag">
+    <button class="btn">Filter</button>
+    <a class="link" href="/assets">reset</a>
+  </form>
+  <details class="upload-box">
+    <summary>Upload to library</summary>
+    <form method="post" action="/assets/upload" enctype="multipart/form-data" class="grid-form">
+      <label>Files <input type="file" name="files" accept="image/*,video/*" multiple required></label>
+      <label>Kind <select name="kind">{{range kinds}}<option>{{.}}</option>{{end}}</select></label>
+      <label>Project
+        <select name="project"><option value="">(none: shared)</option>{{range $id, $name := $d.Projects}}<option value="{{$id}}">{{$name}}</option>{{end}}</select>
+      </label>
+      <label>Tags <input name="tags" placeholder="comma separated"></label>
+      <div class="wide actions"><button class="btn primary">Upload</button></div>
+    </form>
+  </details>
+</section>
+
+<p class="muted small">{{len $d.Assets}} asset(s)</p>
+<div class="asset-grid">
+{{range $d.Assets}}
+  <article class="asset-card" id="a-{{.ID}}">
+    <a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" class="asset-thumb">
+      {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted controls></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
+    </a>
+    <div class="asset-meta">
+      <strong title="{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
+      <div class="small"><span class="tag">{{.Kind}}</span>{{range .Tags}} <a class="tag" href="/assets?tag={{.}}">{{.}}</a>{{end}}</div>
+      <div class="muted small">
+        {{if .ProjectID}}<a href="/projects/{{.ProjectID}}">{{with index $d.Projects .ProjectID}}{{.}}{{else}}(deleted project){{end}}</a> · {{end}}
+        {{if .Width}}{{.Width}}×{{.Height}} · {{end}}{{size .Size}} · {{time .CreatedAt}}
+      </div>
+      <details>
+        <summary class="small">Details / edit</summary>
+        {{if .Prompt}}<p class="small prompt-preview">{{.Prompt}}</p>{{end}}
+        {{if .Model}}<p class="small muted">model: {{.Model}}</p>{{end}}
+        {{if .Parents}}<p class="small muted">inputs: {{join .Parents ", "}}</p>{{end}}
+        <form method="post" action="/assets/{{.ID}}" class="grid-form">
+          <input type="hidden" name="back" value="/assets#a-{{.ID}}">
+          <label>Name <input name="name" value="{{.Name}}"></label>
+          <label>Kind <select name="kind">{{$k := .Kind}}{{range kinds}}<option {{if eq . $k}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+          <label class="wide">Tags <input name="tags" value="{{join .Tags ", "}}"></label>
+          <div class="wide actions">
+            <button class="btn small">Save</button>
+            <a class="link" href="/assets/{{.ID}}/file?download=1">download</a>
+          </div>
+        </form>
+        <form method="post" action="/assets/{{.ID}}/delete" data-confirm="Delete this asset permanently? It will be unlinked from all projects.">
+          <input type="hidden" name="back" value="/assets"><button class="link danger">delete permanently</button>
+        </form>
+      </details>
+    </div>
+  </article>
+{{else}}
+  <p class="muted">No assets match.</p>
+{{end}}
+</div>
+{{end}}

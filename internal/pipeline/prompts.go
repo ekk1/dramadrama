@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 )
@@ -59,4 +60,53 @@ func (p *Prompts) Render(name string, data any) (string, error) {
 		return "", fmt.Errorf("prompt %s: %w", name, err)
 	}
 	return strings.TrimSpace(buf.String()), nil
+}
+
+// Names lists all template names ("idea.system", …) in pipeline order.
+func (p *Prompts) Names() []string {
+	order := []string{"idea", "visual_prompts", "storyboard", "shot_prompts"}
+	var out []string
+	for _, stage := range order {
+		out = append(out, stage+".system", stage+".user")
+	}
+	return out
+}
+
+func (p *Prompts) valid(name string) bool {
+	return slices.Contains(p.Names(), name)
+}
+
+// Default returns the built-in text of a template.
+func (p *Prompts) Default(name string) (string, error) {
+	data, err := defaultPrompts.ReadFile("prompts/" + name + ".tmpl")
+	return string(data), err
+}
+
+// Save writes an override after checking that it parses.
+func (p *Prompts) Save(name, src string) error {
+	if !p.valid(name) {
+		return fmt.Errorf("unknown prompt %q", name)
+	}
+	if p.OverrideDir == "" {
+		return errors.New("no prompt override directory configured")
+	}
+	if _, err := template.New(name).Funcs(promptFuncs).Parse(src); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p.OverrideDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(p.OverrideDir, name+".tmpl"), []byte(src), 0o644)
+}
+
+// Reset removes an override, restoring the built-in template.
+func (p *Prompts) Reset(name string) error {
+	if !p.valid(name) || p.OverrideDir == "" {
+		return fmt.Errorf("unknown prompt %q", name)
+	}
+	err := os.Remove(filepath.Join(p.OverrideDir, name+".tmpl"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }

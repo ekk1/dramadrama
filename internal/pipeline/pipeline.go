@@ -57,7 +57,7 @@ type Service struct {
 	NewImage func(p *config.Provider) (imagegen.Generator, error)
 
 	mu      sync.Mutex
-	running map[string]bool
+	running map[string]context.CancelFunc
 }
 
 // New wires a Service with the real provider factories.
@@ -70,7 +70,7 @@ func New(cfg *config.Manager, projects *project.Store, lib *assets.Store, prompt
 		NewImage: func(p *config.Provider) (imagegen.Generator, error) {
 			return imagegen.New(imagegen.Options{Type: p.Type, BaseURL: p.BaseURL, APIKey: p.Key(), Headers: p.Headers})
 		},
-		running: map[string]bool{},
+		running: map[string]context.CancelFunc{},
 	}
 }
 
@@ -78,16 +78,27 @@ func New(cfg *config.Manager, projects *project.Store, lib *assets.Store, prompt
 func (s *Service) IsRunning(projectID, key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.running[projectID+"/"+key]
+	return s.running[projectID+"/"+key] != nil
 }
 
-func (s *Service) acquire(k string) bool {
+// Cancel stops an active run. It reports whether one was found.
+func (s *Service) Cancel(projectID, key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running[k] {
+	if c := s.running[projectID+"/"+key]; c != nil {
+		c()
+		return true
+	}
+	return false
+}
+
+func (s *Service) acquire(k string, cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running[k] != nil {
 		return false
 	}
-	s.running[k] = true
+	s.running[k] = cancel
 	return true
 }
 
@@ -107,7 +118,9 @@ func (s *Service) Run(ctx context.Context, r RunRequest, emit Emit) error {
 	}
 	key := project.RunKey(r.Stage, r.Target)
 	lock := r.ProjectID + "/" + key
-	if !s.acquire(lock) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if !s.acquire(lock, cancel) {
 		return ErrBusy
 	}
 	defer s.release(lock)
@@ -141,6 +154,10 @@ func (s *Service) Run(ctx context.Context, r RunRequest, emit Emit) error {
 	run := &project.Run{Status: "done", Provider: prov, Model: model, StartedAt: start, EndedAt: time.Now().UTC()}
 	if err != nil {
 		run.Status, run.Error = "error", err.Error()
+		if ctx.Err() != nil {
+			run.Status, run.Error = "error", "stopped"
+			err = errors.New("stopped")
+		}
 	}
 	_, _ = s.Projects.Update(r.ProjectID, func(p *project.Project) error {
 		setRun(p, key, run)
@@ -195,6 +212,9 @@ func (s *Service) complete(ctx context.Context, sm config.StageModel, system, us
 	if !p.IsLLM() {
 		return "", fmt.Errorf("provider %q is not an LLM provider", sm.Provider)
 	}
+	if err := keyCheck(p); err != nil {
+		return "", err
+	}
 	client, err := s.NewLLM(p)
 	if err != nil {
 		return "", err
@@ -221,6 +241,19 @@ func (s *Service) complete(ctx context.Context, sm config.StageModel, system, us
 		return "", fmt.Errorf("model returned no text (finish reason %q)", resp.FinishReason)
 	}
 	return resp.Text, nil
+}
+
+// keyCheck fails early with an actionable message when a provider that
+// requires a key has none. OpenAI-compatible endpoints are exempt because
+// local servers (Ollama, vLLM, …) often need no key.
+func keyCheck(p *config.Provider) error {
+	if p.HasKey() || p.Type == llm.TypeOpenAIChat {
+		return nil
+	}
+	if p.APIKeyEnv != "" {
+		return fmt.Errorf("provider %q has no API key: set the %s environment variable or store a key in Settings", p.Name, p.APIKeyEnv)
+	}
+	return fmt.Errorf("provider %q has no API key: add one in Settings", p.Name)
 }
 
 // maxLLMImageBytes skips images larger than most providers accept inline.
@@ -416,6 +449,9 @@ func (s *Service) generateImage(ctx context.Context, r RunRequest, prompt string
 	p := cfg.Provider(provName)
 	if p == nil || !p.IsImage() {
 		return res, fmt.Errorf("%q is not a configured image provider", provName)
+	}
+	if err := keyCheck(p); err != nil {
+		return res, err
 	}
 	var refs []imagegen.Image
 	var used []string
