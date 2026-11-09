@@ -1,0 +1,30 @@
+Story:
+{{.P.Story}}
+{{- if .P.Visuals}}
+
+Visual designs:
+{{- range .P.Visuals}}
+- [{{.Kind}}] {{.Name}}: {{.Prompt}}
+{{- end}}
+{{- end}}
+{{- if .P.Style}}
+
+Global style (appended automatically, do not repeat): {{.P.Style}}
+{{- end}}
+
+Frame aspect ratio: {{.P.AspectRatio}}
+{{- with .Prev}}
+
+Previous shot (#{{.Number}}): {{.Scene}} | {{.Action}} | camera: {{.Camera}}
+{{- end}}
+
+THIS SHOT (#{{.Shot.Number}}, {{.Shot.Duration}}s):
+- Scene: {{.Shot.Scene}}
+- Characters: {{join .Shot.Characters ", "}}
+- Action: {{.Shot.Action}}
+- Dialogue: {{.Shot.Dialogue}}
+- Camera: {{.Shot.Camera}}
+{{- with .Next}}
+
+Next shot (#{{.Number}}): {{.Scene}} | {{.Action}}
+{{- end}}

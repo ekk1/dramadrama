@@ -1,0 +1,16 @@
+Story:
+{{.P.Story}}
+{{- if .P.Requirements}}
+
+Requirements:
+{{.P.Requirements}}
+{{- end}}
+{{- if .P.Visuals}}
+
+Visual designs:
+{{- range .P.Visuals}}
+- [{{.Kind}}] {{.Name}}: {{.Description}}
+{{- end}}
+{{- end}}
+
+Frame aspect ratio: {{.P.AspectRatio}}
