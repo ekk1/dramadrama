@@ -74,6 +74,8 @@ data/
   assets/index.json           asset metadata (kind, provenance, tags, …)
   assets/files/<sha256>.<ext> asset content, de-duplicated
   prompts/<name>.tmpl         prompt template overrides (edit on the Prompts page)
+  logs/<day>/<time>_….json    request log: one file per LLM call or media generation,
+                              with the full prompt and output (view on the Logs page)
 ```
 
 ## Code layout
@@ -86,6 +88,7 @@ internal/imagegen  image generation interface; fal.ai queue API client
 internal/assets    asset library
 internal/project   project model and JSON store
 internal/config    configuration
+internal/reqlog    request log (one JSON file per model request)
 internal/pipeline  stage implementations and prompt templates (pipeline/prompts/*.tmpl)
 internal/server    HTTP handlers (html/template, SSE for streaming runs)
 web/               templates, CSS and JS (embedded into the binary)

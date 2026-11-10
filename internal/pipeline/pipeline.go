@@ -18,6 +18,7 @@ import (
 	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
 	"github.com/ekk1/dramadrama/internal/project"
+	"github.com/ekk1/dramadrama/internal/reqlog"
 )
 
 // ErrBusy is returned when the same step is already running.
@@ -51,6 +52,8 @@ type Service struct {
 	Projects *project.Store
 	Assets   *assets.Store
 	Prompts  *Prompts
+	// Log records every model request; nil disables logging.
+	Log *reqlog.Store
 
 	// Factories; replaceable in tests.
 	NewLLM   func(p *config.Provider) (llm.Client, error)
@@ -199,8 +202,28 @@ func (s *Service) stageModel(stage string, r RunRequest) config.StageModel {
 	return sm
 }
 
+// callInfo says what a model request is for; it ends up in the request log.
+type callInfo struct {
+	ProjectID string
+	Stage     string
+	Target    string   // visual or shot ID, if the call is for one item
+	Label     string   // human-readable target
+	ImageIDs  []string // assets attached to an LLM call
+}
+
+// writeLog stores a request log entry; failures only produce a status line.
+func (s *Service) writeLog(e *reqlog.Entry, start time.Time, err error, emit Emit) {
+	e.Time, e.DurationMS, e.Status = start, time.Since(start).Milliseconds(), "ok"
+	if err != nil {
+		e.Status, e.Error = "error", err.Error()
+	}
+	if werr := s.Log.Write(e); werr != nil {
+		emit(Event{Type: "status", Text: "Could not write the request log: " + werr.Error()})
+	}
+}
+
 // complete streams one LLM call, forwarding text deltas to emit.
-func (s *Service) complete(ctx context.Context, sm config.StageModel, system, user string, images []llm.Part, jsonMode bool, emit Emit) (string, error) {
+func (s *Service) complete(ctx context.Context, sm config.StageModel, info callInfo, system, user string, images []llm.Part, jsonMode bool, emit Emit) (string, error) {
 	if sm.Provider == "" || sm.Model == "" {
 		return "", errors.New("no provider/model configured for this step; set one in Settings or in the run options")
 	}
@@ -229,7 +252,24 @@ func (s *Service) complete(ctx context.Context, sm config.StageModel, system, us
 		JSON:        jsonMode,
 	}
 	emit(Event{Type: "status", Text: fmt.Sprintf("Calling %s / %s…", sm.Provider, sm.Model)})
+	start := time.Now()
 	resp, err := llm.Collect(client.Stream(ctx, req), func(d string) { emit(Event{Type: "delta", Text: d}) })
+	entry := &reqlog.Entry{
+		Kind: reqlog.KindLLM, ProjectID: info.ProjectID, Stage: info.Stage, Target: info.Target, Label: info.Label,
+		Provider: sm.Provider, Model: sm.Model,
+		Request:  map[string]any{"system": system, "user": user, "json": jsonMode},
+		Response: map[string]any{"text": resp.Text, "finish_reason": resp.FinishReason, "usage": resp.Usage},
+	}
+	if len(info.ImageIDs) > 0 {
+		entry.Request["images"] = info.ImageIDs
+	}
+	if sm.Temperature != nil {
+		entry.Request["temperature"] = *sm.Temperature
+	}
+	if sm.MaxTokens > 0 {
+		entry.Request["max_tokens"] = sm.MaxTokens
+	}
+	s.writeLog(entry, start, err, emit)
 	if err != nil {
 		return "", err
 	}
@@ -266,8 +306,7 @@ const maxLLMImageBytes = 5 << 20
 var llmImageTypes = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
 
 // llmImages loads reference assets as inline image parts.
-func (s *Service) llmImages(ids []string, emit Emit) []llm.Part {
-	var out []llm.Part
+func (s *Service) llmImages(ids []string, emit Emit) (out []llm.Part, used []string) {
 	for _, id := range ids {
 		if len(out) >= 6 {
 			emit(Event{Type: "status", Text: "Only the first 6 reference images are sent to the model."})
@@ -282,8 +321,9 @@ func (s *Service) llmImages(ids []string, emit Emit) []llm.Part {
 			continue
 		}
 		out = append(out, llm.ImagePart(a.MIME, data))
+		used = append(used, a.ID)
 	}
-	return out
+	return out, used
 }
 
 func (s *Service) render(stage string, data promptData) (string, string, error) {
@@ -308,14 +348,15 @@ func (s *Service) runIdea(ctx context.Context, r RunRequest, emit Emit) (string,
 		return sm.Provider, sm.Model, errors.New("enter a core idea first")
 	}
 	var images []llm.Part
+	var imageIDs []string
 	if sm.SendImages {
-		images = s.llmImages(p.ReferenceIDs, emit)
+		images, imageIDs = s.llmImages(p.ReferenceIDs, emit)
 	}
 	sys, user, err := s.render(project.StageIdea, promptData{P: p, ImageCount: len(images)})
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
-	text, err := s.complete(ctx, sm, sys, user, images, false, emit)
+	text, err := s.complete(ctx, sm, callInfo{ProjectID: p.ID, Stage: project.StageIdea, ImageIDs: imageIDs}, sys, user, images, false, emit)
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
@@ -339,14 +380,15 @@ func (s *Service) runVisualPrompts(ctx context.Context, r RunRequest, emit Emit)
 		return sm.Provider, sm.Model, errors.New("the story is empty: run idea expansion or write the story first")
 	}
 	var images []llm.Part
+	var imageIDs []string
 	if sm.SendImages {
-		images = s.llmImages(p.ReferenceIDs, emit)
+		images, imageIDs = s.llmImages(p.ReferenceIDs, emit)
 	}
 	sys, user, err := s.render(project.StageVisualPrompts, promptData{P: p, ImageCount: len(images)})
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
-	text, err := s.complete(ctx, sm, sys, user, images, true, emit)
+	text, err := s.complete(ctx, sm, callInfo{ProjectID: p.ID, Stage: project.StageVisualPrompts, ImageIDs: imageIDs}, sys, user, images, true, emit)
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
@@ -442,14 +484,15 @@ type imageResult struct {
 }
 
 // generateImage calls the image backend and stores the outputs as assets.
-func (s *Service) generateImage(ctx context.Context, r RunRequest, prompt string, refIDs []string, meta assets.Asset, emit Emit) (*imageResult, error) {
+// target is the visual or shot ID the image is for.
+func (s *Service) generateImage(ctx context.Context, r RunRequest, target, prompt string, refIDs []string, meta assets.Asset, emit Emit) (res *imageResult, err error) {
 	cfg := s.Config.Get()
 	ic := cfg.Image
 	provName := ic.Provider
 	if r.Provider != "" {
 		provName = r.Provider
 	}
-	res := &imageResult{Provider: provName}
+	res = &imageResult{Provider: provName}
 	p := cfg.Provider(provName)
 	if p == nil || !p.IsImage() {
 		return res, fmt.Errorf("%q is not a configured image provider", provName)
@@ -487,12 +530,41 @@ func (s *Service) generateImage(ctx context.Context, r RunRequest, prompt string
 		return res, err
 	}
 	emit(Event{Type: "status", Text: fmt.Sprintf("Generating with %s / %s (%d reference image(s))…", provName, model, len(refs))})
-	out, err := gen.Generate(ctx, &imagegen.Request{
+	greq := &imagegen.Request{
 		Model: model, Prompt: prompt, AspectRatio: aspect, NumImages: 1, References: refs, Extra: ic.Extra,
-	})
+	}
+	entry := &reqlog.Entry{
+		Kind: reqlog.KindImage, ProjectID: r.ProjectID, Stage: meta.Stage, Target: target, Label: meta.Name,
+		Provider: provName, Model: model,
+		Request:  map[string]any{"prompt": prompt, "aspect_ratio": aspect},
+		Response: map[string]any{},
+	}
+	if len(used) > 0 {
+		entry.Request["references"] = used
+	}
+	if d, ok := gen.(imagegen.PayloadDescriber); ok {
+		entry.Request["payload"] = d.DescribePayload(greq)
+	}
+	start := time.Now()
+	out, err := gen.Generate(ctx, greq)
 	if err != nil {
+		s.writeLog(entry, start, err, emit)
 		return res, err
 	}
+	// The log entry is written once the outputs are stored (or fail to be).
+	defer func() {
+		entry.Response["assets"] = assetIDs(res.Assets)
+		if out.Seed != nil {
+			entry.Response["seed"] = *out.Seed
+		}
+		if out.RequestID != "" {
+			entry.Response["request_id"] = out.RequestID
+		}
+		if len(out.Raw) > 0 {
+			entry.Response["raw"] = out.Raw
+		}
+		s.writeLog(entry, start, err, emit)
+	}()
 	for _, img := range out.Images {
 		m := meta
 		m.MIME = img.MIME
@@ -587,7 +659,7 @@ func (s *Service) runVisualImages(ctx context.Context, r RunRequest, emit Emit) 
 		if strings.TrimSpace(v.Prompt) == "" {
 			return fmt.Errorf("%s has no prompt", v.Name)
 		}
-		res, err := s.generateImage(ctx, r, withStyle(v.Prompt, p.Style), v.ReferenceIDs, assets.Asset{
+		res, err := s.generateImage(ctx, r, id, withStyle(v.Prompt, p.Style), v.ReferenceIDs, assets.Asset{
 			Kind: assets.KindConcept, Name: v.Name, Stage: project.StageVisualImages, Tags: []string{v.Kind},
 		}, emit)
 		last = res
@@ -621,14 +693,15 @@ func (s *Service) runStoryboard(ctx context.Context, r RunRequest, emit Emit) (s
 		return sm.Provider, sm.Model, errors.New("the story is empty: run idea expansion or write the story first")
 	}
 	var images []llm.Part
+	var imageIDs []string
 	if sm.SendImages {
-		images = s.llmImages(p.ReferenceIDs, emit)
+		images, imageIDs = s.llmImages(p.ReferenceIDs, emit)
 	}
 	sys, user, err := s.render(project.StageStoryboard, promptData{P: p, ImageCount: len(images)})
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
-	text, err := s.complete(ctx, sm, sys, user, images, true, emit)
+	text, err := s.complete(ctx, sm, callInfo{ProjectID: p.ID, Stage: project.StageStoryboard, ImageIDs: imageIDs}, sys, user, images, true, emit)
 	if err != nil {
 		return sm.Provider, sm.Model, err
 	}
@@ -738,7 +811,8 @@ func (s *Service) runShotPrompts(ctx context.Context, r RunRequest, emit Emit) (
 		if err != nil {
 			return err
 		}
-		text, err := s.complete(ctx, sm, sys, user, nil, true, emit)
+		info := callInfo{ProjectID: p.ID, Stage: project.StageShotPrompts, Target: id, Label: fmt.Sprintf("Shot %d", p.Shots[idx].Number)}
+		text, err := s.complete(ctx, sm, info, sys, user, nil, true, emit)
 		if err != nil {
 			return err
 		}
@@ -840,7 +914,7 @@ func (s *Service) runKeyframes(ctx context.Context, r RunRequest, emit Emit) (st
 			return fmt.Errorf("shot %d has no keyframe prompt yet: run step 5 first", sh.Number)
 		}
 		refs, _ := ShotRefs(p, sh)
-		res, err := s.generateImage(ctx, r, withStyle(sh.KeyframePrompt, p.Style), refs, assets.Asset{
+		res, err := s.generateImage(ctx, r, id, withStyle(sh.KeyframePrompt, p.Style), refs, assets.Asset{
 			Kind: assets.KindKeyframe, Name: fmt.Sprintf("Shot %d", sh.Number), Stage: project.StageKeyframes,
 			ShotID: sh.ID, Tags: []string{"keyframe"},
 		}, emit)

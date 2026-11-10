@@ -1,0 +1,76 @@
+{{define "content"}}{{$d := .D}}
+<header class="page-head">
+  <h1>{{t "Request log"}}</h1>
+  <p class="muted">{{t "Every LLM call and media generation is recorded as one JSON file, with the full prompt and output. API keys and image data are never stored."}}</p>
+</header>
+<div class="split">
+  <aside class="side-list" aria-label="{{t "Days"}}">
+    {{range $d.Days}}
+    <a href="/logs?day={{.Date}}{{if $d.Query}}&{{$d.Query}}{{end}}" class="side-item {{if eq .Date $d.Day}}current{{end}}">
+      <span>{{.Date}}</span><span class="step-info">{{.Count}}</span>
+    </a>
+    {{else}}<p class="muted small">{{t "Nothing recorded yet."}}</p>{{end}}
+    {{if $d.Days}}
+    <p class="muted small side-note">{{t "Total"}} {{size $d.Size}}</p>
+    <form method="post" action="/logs/delete" data-confirm="{{t "Delete the whole request log?"}}">
+      <input type="hidden" name="all" value="1"><button class="link danger">{{t "clear all"}}</button>
+    </form>
+    {{end}}
+  </aside>
+  <div>
+    <section class="stage">
+      <form method="get" action="/logs" class="filters">
+        <input type="hidden" name="day" value="{{$d.Day}}">
+        <select name="kind" aria-label="{{t "Kind"}}">
+          <option value="">{{t "Any kind"}}</option>
+          {{range logKinds}}<option value="{{.}}" {{if eq . $d.Kind}}selected{{end}}>{{t (logKind .)}}</option>{{end}}
+        </select>
+        <select name="status" aria-label="{{t "Status"}}">
+          <option value="">{{t "Any status"}}</option>
+          <option value="ok" {{if eq $d.Status "ok"}}selected{{end}}>{{t "ok"}}</option>
+          <option value="error" {{if eq $d.Status "error"}}selected{{end}}>{{t "error"}}</option>
+        </select>
+        <select name="project" aria-label="{{t "Project"}}">
+          <option value="">{{t "All projects"}}</option>
+          {{range $id, $name := $d.Projects}}<option value="{{$id}}" {{if eq $id $d.Project}}selected{{end}}>{{$name}}</option>{{end}}
+        </select>
+        <button class="btn">{{t "Filter"}}</button>
+        <a class="link" href="/logs?day={{$d.Day}}">{{t "reset"}}</a>
+        {{if $d.Day}}
+        <span class="muted small push-right">{{$d.Total}} {{t "request(s)"}}</span>
+        <button class="link danger" form="del-day">{{t "delete this day"}}</button>
+        {{end}}
+      </form>
+      <form method="post" action="/logs/delete" id="del-day" data-confirm="{{t "Delete this day's log?"}}"><input type="hidden" name="day" value="{{$d.Day}}"></form>
+    </section>
+
+    {{if $d.Entries}}
+    <div class="table-wrap">
+    <table class="log-table">
+      <thead><tr><th>{{t "Time"}}</th><th>{{t "Kind"}}</th><th>{{t "Step"}}</th><th>{{t "Project"}}</th><th>{{t "Model"}}</th><th class="num-col">{{t "Duration"}}</th><th>{{t "Status"}}</th></tr></thead>
+      <tbody>
+      {{range $d.Entries}}
+        <tr class="{{.Status}}">
+          <td><a href="/logs/{{.Day}}/{{.Name}}">{{clock .Time}}</a></td>
+          <td><span class="tag">{{t (logKind .Kind)}}</span></td>
+          <td>{{t (stageName .Stage)}}{{if .Label}} <span class="muted">· {{t .Label}}</span>{{end}}</td>
+          <td>{{with index $d.Projects .ProjectID}}{{.}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td><span class="muted">{{.Provider}} /</span> {{.Model}}</td>
+          <td class="num-col">{{duration .DurationMS}}</td>
+          <td><span class="status {{if eq .Status "ok"}}done{{else}}error{{end}}"><span class="chip">{{t .Status}}</span>{{if .Error}}<span class="err-text">{{trunc (t .Error) 90}}</span>{{end}}</span></td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{if gt $d.Pages 1}}
+    <p class="pager">
+      {{if gt $d.Page 1}}<a class="btn small" href="/logs?day={{$d.Day}}&page={{add $d.Page -1}}{{if $d.Query}}&{{$d.Query}}{{end}}">{{t "← Newer"}}</a>{{end}}
+      <span class="muted small">{{$d.Page}} / {{$d.Pages}}</span>
+      {{if lt $d.Page $d.Pages}}<a class="btn small" href="/logs?day={{$d.Day}}&page={{add $d.Page 1}}{{if $d.Query}}&{{$d.Query}}{{end}}">{{t "Older →"}}</a>{{end}}
+    </p>
+    {{end}}
+    {{else}}<p class="empty">{{t "No requests match."}}</p>{{end}}
+  </div>
+</div>
+{{end}}

@@ -14,6 +14,7 @@ import (
 	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
 	"github.com/ekk1/dramadrama/internal/project"
+	"github.com/ekk1/dramadrama/internal/reqlog"
 )
 
 // fakeLLM answers based on which stage's system prompt it sees.
@@ -81,6 +82,7 @@ func newTestService(t *testing.T) (*Service, *fakeLLM, *fakeImage) {
 	projects, _ := project.Open(filepath.Join(dir, "projects"))
 	lib, _ := assets.Open(filepath.Join(dir, "assets"))
 	s := New(cfg, projects, lib, &Prompts{})
+	s.Log, _ = reqlog.Open(filepath.Join(dir, "logs"))
 	fl, fi := &fakeLLM{}, &fakeImage{}
 	s.NewLLM = func(*config.Provider) (llm.Client, error) { return fl, nil }
 	s.NewImage = func(*config.Provider) (imagegen.Generator, error) { return fi, nil }
@@ -253,5 +255,71 @@ func TestMissingKey(t *testing.T) {
 	err := s.Run(context.Background(), RunRequest{ProjectID: p.ID, Stage: project.StageIdea}, nil)
 	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Errorf("want missing key error, got %v", err)
+	}
+}
+
+func TestRequestsAreLogged(t *testing.T) {
+	s, _, _ := newTestService(t)
+	ctx := context.Background()
+	p, _ := s.Projects.Create("Demo", "an idea")
+	ref, _ := s.Assets.Put(assets.Asset{Kind: assets.KindReference, ProjectID: p.ID, MIME: "image/png"}, []byte("\x89PNG\r\n\x1a\nref"))
+	s.Projects.Update(p.ID, func(p *project.Project) error { p.ReferenceIDs = []string{ref.ID}; return nil })
+	for _, st := range []string{project.StageIdea, project.StageVisualPrompts, project.StageVisualImages} {
+		if err := s.Run(ctx, RunRequest{ProjectID: p.ID, Stage: st}, nil); err != nil {
+			t.Fatalf("%s: %v", st, err)
+		}
+	}
+	days, _ := s.Log.Days()
+	if len(days) != 1 || days[0].Count != 4 { // idea, visual prompts, 2 concept images
+		t.Fatalf("days: %+v", days)
+	}
+	list, _ := s.Log.List(days[0].Date)
+	byStage := map[string]*reqlog.Entry{}
+	for _, e := range list {
+		byStage[e.Stage] = e
+		if e.Status != "ok" || e.ProjectID != p.ID || e.Provider == "" || e.Model == "" {
+			t.Errorf("incomplete entry: %+v", e)
+		}
+	}
+	idea := byStage[project.StageIdea]
+	if idea.Kind != reqlog.KindLLM || !strings.Contains(idea.Request["user"].(string), "an idea") ||
+		!strings.Contains(idea.Request["system"].(string), "screenwriter") || !strings.Contains(idea.Response["text"].(string), "Clockmaker") ||
+		idea.Response["finish_reason"] != "stop" {
+		t.Errorf("idea entry: %+v", idea)
+	}
+	// Reference images are logged by asset ID (visual prompts send them by default).
+	if imgs, _ := byStage[project.StageVisualPrompts].Request["images"].([]any); len(imgs) != 1 || imgs[0] != ref.ID {
+		t.Errorf("images: %v", byStage[project.StageVisualPrompts].Request["images"])
+	}
+	img := byStage[project.StageVisualImages]
+	if img.Kind != reqlog.KindImage || img.Target == "" || img.Label == "" || !strings.Contains(img.Request["prompt"].(string), "teal and orange") {
+		t.Errorf("image entry: %+v", img)
+	}
+	if out, _ := img.Response["assets"].([]any); len(out) != 1 {
+		t.Errorf("image outputs: %v", img.Response["assets"])
+	}
+
+	// Failures are logged with the error.
+	s.NewLLM = func(*config.Provider) (llm.Client, error) { return failingLLM{}, nil }
+	if err := s.Run(ctx, RunRequest{ProjectID: p.ID, Stage: project.StageIdea}, nil); err == nil {
+		t.Fatal("expected failure")
+	}
+	list, _ = s.Log.List(days[0].Date)
+	if len(list) != 5 || list[0].Status != "error" || !strings.Contains(list[0].Error, "upstream down") {
+		t.Errorf("failure not logged: %+v", list[0])
+	}
+}
+
+type failingLLM struct{}
+
+func (failingLLM) Chat(context.Context, *llm.Request) (*llm.Response, error) {
+	return nil, errors.New("upstream down")
+}
+
+func (failingLLM) Stream(context.Context, *llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		if yield(llm.Chunk{Delta: "partial"}, nil) {
+			yield(llm.Chunk{}, errors.New("upstream down"))
+		}
 	}
 }

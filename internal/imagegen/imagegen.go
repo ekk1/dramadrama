@@ -50,6 +50,13 @@ type Generator interface {
 	Generate(ctx context.Context, req *Request) (*Result, error)
 }
 
+// PayloadDescriber is implemented by generators that can show the request
+// body they would send, for the request log. Inline binary data is
+// replaced by a short placeholder and credentials are never included.
+type PayloadDescriber interface {
+	DescribePayload(req *Request) map[string]any
+}
+
 // Provider types.
 const TypeFal = "fal"
 

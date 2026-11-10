@@ -2,7 +2,7 @@
 <header class="project-head">
   <a class="crumb" href="/projects">{{t "← Projects"}}</a>
   <h1>{{$p.Name}}</h1>
-  <p class="project-meta"><span class="tag accent">{{$p.AspectRatio}}</span><span>{{t "Updated"}} {{time $p.UpdatedAt}}</span></p>
+  <p class="project-meta"><span class="tag accent">{{$p.AspectRatio}}</span><span>{{t "Updated"}} {{time $p.UpdatedAt}}</span><a href="/logs?project={{$p.ID}}">{{t "Request log"}}</a></p>
 </header>
 
 <div class="workbench {{arClass $p.AspectRatio}}">

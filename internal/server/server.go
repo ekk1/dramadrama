@@ -23,6 +23,7 @@ import (
 	"github.com/ekk1/dramadrama/internal/llm"
 	"github.com/ekk1/dramadrama/internal/pipeline"
 	"github.com/ekk1/dramadrama/internal/project"
+	"github.com/ekk1/dramadrama/internal/reqlog"
 	"github.com/ekk1/dramadrama/web"
 )
 
@@ -33,6 +34,7 @@ type Options struct {
 	Assets   *assets.Store
 	Pipeline *pipeline.Service
 	Prompts  *pipeline.Prompts
+	Logs     *reqlog.Store
 	// DevDir, when set, serves templates and static files from this
 	// directory on disk (re-parsed per request) instead of the embedded copy.
 	DevDir string
@@ -45,6 +47,7 @@ type Server struct {
 	assets   *assets.Store
 	pipe     *pipeline.Service
 	prompts  *pipeline.Prompts
+	logs     *reqlog.Store
 	files    fs.FS
 	dev      bool
 
@@ -56,13 +59,13 @@ type Server struct {
 // New builds the server and parses the templates.
 func New(o Options) (*Server, error) {
 	s := &Server{
-		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts,
+		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts, logs: o.Logs,
 		files: web.FS, pages: map[string]*template.Template{},
 	}
 	if o.DevDir != "" {
 		s.files, s.dev = os.DirFS(o.DevDir), true
 	}
-	for _, page := range []string{"projects", "project", "assets", "settings", "prompts"} {
+	for _, page := range []string{"projects", "project", "assets", "settings", "prompts", "logs", "log"} {
 		if _, err := s.page(page); err != nil {
 			return nil, err
 		}
@@ -105,6 +108,10 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /assets/{aid}", s.handleUpdateAsset)
 	m.HandleFunc("POST /assets/{aid}/delete", s.handleDeleteAsset)
 	m.HandleFunc("GET /api/assets", s.handleAPIAssets)
+
+	m.HandleFunc("GET /logs", s.handleLogs)
+	m.HandleFunc("GET /logs/{day}/{name}", s.handleLog)
+	m.HandleFunc("POST /logs/delete", s.handleDeleteLogs)
 
 	m.HandleFunc("GET /settings", s.handleSettings)
 	m.HandleFunc("POST /settings", s.handleSaveSettings)
@@ -247,18 +254,24 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return ids[len(ids)-1]
 		},
-		"steps":   projectSteps,
-		"initial": initial,
-		"arClass": func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
-		"t":       func(s string) string { return s }, // replaced per request in render
-		"join":    strings.Join,
-		"time":    fmtTime,
-		"size":    fmtSize,
-		"dict":    dict,
-		"add":     func(a, b int) int { return a + b },
-		"trunc":   truncate,
-		"lower":   strings.ToLower,
-		"hasPref": strings.HasPrefix,
+		"steps":     projectSteps,
+		"initial":   initial,
+		"arClass":   func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
+		"t":         func(s string) string { return s }, // replaced per request in render
+		"join":      strings.Join,
+		"time":      fmtTime,
+		"clock":     func(t time.Time) string { return t.Local().Format("15:04:05") },
+		"second":    func(t time.Time) string { return t.Local().Format("05") },
+		"duration":  fmtDuration,
+		"logKind":   logKind,
+		"stageName": stageName,
+		"logKinds":  func() []string { return []string{reqlog.KindLLM, reqlog.KindImage, reqlog.KindVideo} },
+		"size":      fmtSize,
+		"dict":      dict,
+		"add":       func(a, b int) int { return a + b },
+		"trunc":     truncate,
+		"lower":     strings.ToLower,
+		"hasPref":   strings.HasPrefix,
 		"json": func(v any) string {
 			b, _ := json.MarshalIndent(v, "", "  ")
 			return string(b)

@@ -74,6 +74,10 @@ var zhPatterns = []pattern{
 	pat(`^Generating with (.+) / (.+) \((\d+) reference image\(s\)\)…$`, func(m []string, _ func(string) string) string {
 		return "正在使用 " + m[1] + " / " + m[2] + " 生成（" + m[3] + " 张参考图）…"
 	}),
+	pat(`^Shot (\d+)$`, func(m []string, _ func(string) string) string { return "镜头 " + m[1] }),
+	pat(`^Could not write the request log: (.*)$`, func(m []string, _ func(string) string) string {
+		return "无法写入请求日志：" + m[1]
+	}),
 	pat(`^Saved (\S+)$`, func(m []string, _ func(string) string) string { return "已保存 " + m[1] }),
 	pat(`^── Shot (\d+) \((\d+)/(\d+)\)$`, func(m []string, _ func(string) string) string {
 		return "── 镜头 " + m[1] + "（" + m[2] + "/" + m[3] + "）"
@@ -132,6 +136,40 @@ func jsStrings(tr func(string) string) map[string]string {
 
 // zh is the Simplified Chinese dictionary.
 var zh = map[string]string{
+	"Logs":          "日志",
+	"Request log":   "请求日志",
+	"← Request log": "← 请求日志",
+	"Every LLM call and media generation is recorded as one JSON file, with the full prompt and output. API keys and image data are never stored.": "每次 LLM 调用和媒体生成都会记录为一个 JSON 文件，包含完整的提示词和输出。API 密钥和图片数据不会被保存。",
+	"Days":                          "日期",
+	"Nothing recorded yet.":         "还没有记录。",
+	"Total":                         "共",
+	"Delete the whole request log?": "删除全部请求日志？",
+	"clear all":                     "清空全部",
+	"Status":                        "状态",
+	"Any status":                    "全部状态",
+	"ok":                            "成功",
+	"request(s)":                    "条请求",
+	"delete this day":               "删除当天",
+	"Delete this day's log?":        "删除这一天的日志？",
+	"Time":                          "时间",
+	"Duration":                      "耗时",
+	"← Newer":                       "← 较新",
+	"Older →":                       "较早 →",
+	"No requests match.":            "没有符合条件的请求。",
+	"download JSON":                 "下载 JSON",
+	"Request":                       "请求",
+	"Response":                      "响应",
+	"Input images":                  "输入图片",
+	"Output":                        "输出",
+	"No response was received.":     "没有收到响应。",
+	"System prompt":                 "系统提示词",
+	"User prompt":                   "用户提示词",
+	"Prompt":                        "提示词",
+	"Parameters":                    "参数",
+	"Details":                       "详情",
+	"Video":                         "视频",
+	"Visual prompts":                "视觉提示词",
+	"Concept images":                "概念图",
 	// Layout / navigation
 	"Projects":                 "项目",
 	"Asset library":            "素材库",

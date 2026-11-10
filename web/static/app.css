@@ -411,6 +411,38 @@ details[open] > summary { margin-bottom: 10px; color: var(--text); }
 .settings-table tr:last-child td { border-bottom: 0; }
 .settings-table td:first-child { font-weight: 500; white-space: nowrap; }
 
+/* ---------------------------------------------------------------- side list & request log */
+.split { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 28px; align-items: start; }
+.side-list { position: sticky; top: calc(var(--topbar-h) + 20px); display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - var(--topbar-h) - 40px); overflow-y: auto; }
+.side-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border-radius: 10px;
+  color: var(--muted); font-size: .9rem; font-weight: 500; font-variant-numeric: tabular-nums; transition: background-color .15s, color .15s;
+}
+.side-item:hover { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); text-decoration: none; }
+.side-item.current { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.side-note { margin: 12px 10px 4px; }
+.side-list form { margin: 0 10px; }
+.side-title { margin: 14px 10px 4px; font-size: .72rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.side-title:first-child { margin-top: 0; }
+
+.log-table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
+.log-table th { font-size: .74rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+.log-table th, .log-table td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: .88rem; vertical-align: top; }
+.log-table tr:last-child td { border-bottom: 0; }
+.log-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.log-table td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
+.log-table .num-col { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 16px 0 0; }
+.log-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+h4 { font-size: .76rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 18px 0 6px; }
+h2 + h4 { margin-top: 0; }
+.log-text {
+  margin: 0; padding: 12px 14px; max-height: 560px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; font-size: .88rem; line-height: 1.6;
+}
+.log-text.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; }
+.project-head + .flash { margin: 0 0 20px; max-width: none; }
+
 /* ---------------------------------------------------------------- picker dialog */
 dialog#picker {
   width: min(980px, 94vw); max-height: 86vh; border: 1px solid var(--border); border-radius: var(--radius); padding: 0;
@@ -430,6 +462,9 @@ dialog#picker::backdrop { background: rgb(10 8 20 / .5); -webkit-backdrop-filter
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 980px) {
+  .split { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .side-list { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; max-height: none; }
+  .log-cols { grid-template-columns: minmax(0, 1fr); }
   .workbench { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .stepper {
     flex-direction: row; gap: 4px; overflow-x: auto; top: var(--topbar-h); z-index: 10; margin: 0 -24px; padding: 8px 24px;
