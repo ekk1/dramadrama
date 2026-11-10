@@ -247,6 +247,9 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return ids[len(ids)-1]
 		},
+		"steps":   projectSteps,
+		"initial": initial,
+		"arClass": func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
 		"t":       func(s string) string { return s }, // replaced per request in render
 		"join":    strings.Join,
 		"time":    fmtTime,
@@ -265,8 +268,79 @@ func (s *Server) funcs() template.FuncMap {
 		"imageTypes":  func() []string { return imagegen.Types },
 		"llmStages":   func() []string { return config.LLMStages },
 		"aspects":     func() []string { return []string{"9:16", "16:9", "3:4", "4:3", "1:1"} },
-		"visualKinds": func() []string { return []string{"character", "scene", "prop", "style"} },
+		"visualKinds": func() []string { return visualKinds },
 	}
+}
+
+// stepView describes one pipeline step for the step navigation.
+type stepView struct {
+	Num   int
+	Label string // translation key
+	State string // "done", "partial" or ""
+	Info  string // short counter such as "3" or "2/8"
+}
+
+// projectSteps summarises how far a project has progressed through the
+// six steps. A step is "done" when it has output for every item it covers
+// and "partial" when only some items have output.
+func projectSteps(p *project.Project) []stepView {
+	state := func(n, of int) string {
+		switch {
+		case of > 0 && n >= of:
+			return "done"
+		case n > 0:
+			return "partial"
+		}
+		return ""
+	}
+	flag := func(ok bool) string {
+		if ok {
+			return "done"
+		}
+		return ""
+	}
+	count := func(n int) string {
+		if n == 0 {
+			return ""
+		}
+		return fmt.Sprint(n)
+	}
+	ratio := func(n, of int) string {
+		if of == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d/%d", n, of)
+	}
+	var images, prompts, keyframes int
+	for _, v := range p.Visuals {
+		if len(v.AssetIDs) > 0 {
+			images++
+		}
+	}
+	for _, sh := range p.Shots {
+		if sh.KeyframePrompt != "" {
+			prompts++
+		}
+		if len(sh.KeyframeIDs) > 0 {
+			keyframes++
+		}
+	}
+	return []stepView{
+		{1, "Input", flag(strings.TrimSpace(p.Idea) != ""), ""},
+		{2, "Story", flag(strings.TrimSpace(p.Story) != ""), ""},
+		{3, "Visuals", state(images, len(p.Visuals)), ratio(images, len(p.Visuals))},
+		{4, "Storyboard", flag(len(p.Shots) > 0), count(len(p.Shots))},
+		{5, "Shot prompts", state(prompts, len(p.Shots)), ratio(prompts, len(p.Shots))},
+		{6, "Keyframes", state(keyframes, len(p.Shots)), ratio(keyframes, len(p.Shots))},
+	}
+}
+
+// initial returns the first character of a name, for image placeholders.
+func initial(name string) string {
+	for _, r := range strings.TrimSpace(name) {
+		return strings.ToUpper(string(r))
+	}
+	return "·"
 }
 
 func dict(kv ...any) (map[string]any, error) {

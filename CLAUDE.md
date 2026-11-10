@@ -136,6 +136,21 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   - API keys are never rendered back to the page.
   - `back` redirect targets must pass `back()` validation (local paths
     only).
+- **Frontend conventions:**
+  - Colours, radii and shadows are CSS custom properties at the top of
+    `app.css`, with a dark set under `prefers-color-scheme: dark`. Use the
+    tokens; do not hard-code colours.
+  - Plain "edit and save" forms carry `data-save`. `app.js` marks them
+    dirty on input and posts dirty forms in the background before a run
+    or another form post reloads the page, so edits are never lost. Do
+    not put `data-save` on forms whose post has side effects (add, delete,
+    apply JSON).
+  - In JS read a form's URL with `form.getAttribute("action")`: shot
+    forms have a field named `action` that shadows `form.action`.
+  - The project page's step navigation comes from `projectSteps`
+    (server.go); update it when adding a stage.
+  - Uploads must go through `saveUploads`, which caps the request body
+    before any form value is read.
 - **Video readiness:** shots already have `MotionPrompt` and `ClipID`, and
   the asset library has `KindVideo`. Image-to-video should be a new
   interface next to `imagegen`, plus a new stage `clips` after
@@ -154,7 +169,7 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   2. Add prompt templates if it's an LLM stage, plus `Prompts.Names()` and
      `config.LLMStages` entries.
   3. Add a UI section in `project.html` using the `opts`, `runbtn`,
-     `status` and `log` partials.
+     `status` and `log` partials, and a step in `projectSteps`.
   4. Add translations for any new strings.
   5. Add pipeline and server tests.
 
@@ -180,3 +195,8 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
 - Image-to-video stage (see Video readiness above).
 - There is no auth. It's needed before exposing the server beyond
   localhost.
+- The `Host` header is not validated, so a DNS-rebinding page could drive
+  the localhost server. Rejecting unexpected hosts needs a decision on
+  how LAN use (`-addr 0.0.0.0`) should be allowed.
+- A provider stream that closes early without an error is only reported
+  as a warning in the run log; the truncated text is still saved.

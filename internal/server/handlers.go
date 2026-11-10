@@ -22,6 +22,9 @@ import (
 
 const maxUpload = 64 << 20
 
+// visualKinds are the kinds a visual item can have.
+var visualKinds = []string{"character", "scene", "prop", "style"}
+
 func projectURL(id string) string { return "/projects/" + id }
 
 func notFound(w http.ResponseWriter, err error) bool {
@@ -159,7 +162,9 @@ func (s *Server) handleSaveVisual(w http.ResponseWriter, r *http.Request) {
 		if v == nil {
 			return errors.New("visual item not found")
 		}
-		v.Kind = r.FormValue("kind")
+		if k := r.FormValue("kind"); slices.Contains(visualKinds, k) {
+			v.Kind = k
+		}
 		v.Name = strings.TrimSpace(r.FormValue("name"))
 		v.Description = strings.TrimSpace(r.FormValue("description"))
 		v.Prompt = strings.TrimSpace(r.FormValue("prompt"))
@@ -349,13 +354,23 @@ func (s *Server) handleRefs(w http.ResponseWriter, r *http.Request) {
 }
 
 // saveUploads stores multipart files as assets.
-func (s *Server) saveUploads(r *http.Request, meta assets.Asset) ([]*assets.Asset, error) {
-	if err := r.ParseMultipartForm(maxUpload); err != nil {
+func (s *Server) saveUploads(w http.ResponseWriter, r *http.Request, meta func() assets.Asset) ([]*assets.Asset, error) {
+	// Cap the whole request body, and keep at most 8 MB of it in memory
+	// (larger files are spooled to temporary files by the parser). This
+	// must happen before anything reads a form value.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return nil, errors.New("upload too large (limit 64 MB)")
+		}
 		return nil, err
 	}
+	defer r.MultipartForm.RemoveAll()
+	m := meta()
 	var out []*assets.Asset
 	for _, fh := range r.MultipartForm.File["files"] {
-		a, err := s.saveUpload(fh, meta)
+		a, err := s.saveUpload(fh, m)
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", fh.Filename, err)
 		}
@@ -393,7 +408,9 @@ func (s *Server) handleProjectUpload(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.projects.Get(id); notFound(w, err) {
 		return
 	}
-	uploaded, err := s.saveUploads(r, assets.Asset{Kind: assets.KindReference, ProjectID: id, Stage: project.StageInput, Tags: []string{"upload"}})
+	uploaded, err := s.saveUploads(w, r, func() assets.Asset {
+		return assets.Asset{Kind: assets.KindReference, ProjectID: id, Stage: project.StageInput, Tags: []string{"upload"}}
+	})
 	if len(uploaded) > 0 {
 		target := r.FormValue("target")
 		_, uerr := s.projects.Update(id, func(p *project.Project) error {
@@ -540,11 +557,13 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLibraryUpload(w http.ResponseWriter, r *http.Request) {
-	kind := assets.Kind(r.FormValue("kind"))
-	if !slices.Contains(assets.Kinds, kind) {
-		kind = assets.KindReference
-	}
-	_, err := s.saveUploads(r, assets.Asset{Kind: kind, ProjectID: r.FormValue("project"), Tags: assets.ParseTags(r.FormValue("tags"))})
+	_, err := s.saveUploads(w, r, func() assets.Asset {
+		kind := assets.Kind(r.FormValue("kind"))
+		if !slices.Contains(assets.Kinds, kind) {
+			kind = assets.KindReference
+		}
+		return assets.Asset{Kind: kind, ProjectID: r.FormValue("project"), Tags: assets.ParseTags(r.FormValue("tags"))}
+	})
 	done(w, r, "/assets", err)
 }
 

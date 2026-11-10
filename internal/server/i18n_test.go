@@ -42,6 +42,7 @@ func TestTemplateKeysTranslated(t *testing.T) {
 	}
 	goKeys = append(goKeys, config.LLMStages...)
 	goKeys = append(goKeys, "character", "scene", "prop", "style", "Saved",
+		"Input", "Story", "Visuals", "Storyboard", "Shot prompts", "Keyframes", "upload too large (limit 64 MB)",
 		"Project deleted. Its assets remain in the library.", "interrupted (server restarted)")
 	goKeys = append(goKeys, jsKeys...)
 	for _, k := range goKeys {

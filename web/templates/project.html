@@ -1,19 +1,21 @@
 {{define "content"}}{{$p := .D}}{{$base := printf "/projects/%s" $p.ID}}
-<div class="project-head">
-  <div>
-    <a class="muted small" href="/projects">{{t "← Projects"}}</a>
-    <h1>{{$p.Name}}</h1>
-  </div>
-  <nav class="stage-nav" aria-label="{{t "Steps"}}">
-    <a href="#s1">{{t "1 Input"}}</a><a href="#s2">{{t "2 Story"}}</a><a href="#s3">{{t "3 Visuals"}}</a>
-    <a href="#s4">{{t "4 Storyboard"}}</a><a href="#s5">{{t "5 Shot prompts"}}</a><a href="#s6">{{t "6 Keyframes"}}</a>
-  </nav>
-</div>
+<header class="project-head">
+  <a class="crumb" href="/projects">{{t "← Projects"}}</a>
+  <h1>{{$p.Name}}</h1>
+  <p class="project-meta"><span class="tag accent">{{$p.AspectRatio}}</span><span>{{t "Updated"}} {{time $p.UpdatedAt}}</span></p>
+</header>
+
+<div class="workbench {{arClass $p.AspectRatio}}">
+<nav class="stepper" aria-label="{{t "Steps"}}">
+  {{range steps $p}}<a class="step {{.State}}" href="#s{{.Num}}"><span class="step-dot">{{.Num}}</span><span class="step-label">{{t .Label}}</span>{{if .Info}}<span class="step-info">{{.Info}}</span>{{end}}</a>
+  {{end}}
+</nav>
+<div class="stages">
 
 {{/* ------------------------------------------------------------------ 1 */}}
 <section class="stage" id="s1">
   <h2><span class="num">1</span> {{t "Input"}}</h2>
-  <form method="post" action="{{$base}}/input" class="grid-form">
+  <form method="post" action="{{$base}}/input" data-save class="grid-form">
     <input type="hidden" name="back" value="{{$base}}#s1">
     <label>{{t "Project name"}} <input name="name" value="{{$p.Name}}"></label>
     <label>{{t "Aspect ratio"}}
@@ -38,10 +40,10 @@
     {{template "runbtn" dict "P" $p "Stage" "idea" "Target" "" "Label" "Expand idea" "Opts" "opts-idea" "Log" "log-idea" "Primary" true}}
   </div>
   {{template "log" dict "ID" "log-idea"}}
-  <form method="post" action="{{$base}}/story">
+  <form method="post" action="{{$base}}/story" data-save>
     <input type="hidden" name="back" value="{{$base}}#s2">
     <label>{{t "Story"}} <span class="muted">{{t "(editable; later steps read this text)"}}</span>
-      <textarea name="story" rows="16" class="mono-ish">{{$p.Story}}</textarea>
+      <textarea name="story" rows="16" class="story">{{$p.Story}}</textarea>
     </label>
     <div class="actions"><button class="btn">{{t "Save story"}}</button></div>
   </form>
@@ -56,7 +58,7 @@
     {{template "opts" dict "ID" "opts-vp" "Kind" "llm" "Stage" "visual_prompts"}}
     {{template "runbtn" dict "P" $p "Stage" "visual_prompts" "Target" "" "Label" "Generate visual prompts" "Opts" "opts-vp" "Log" "log-vp" "Primary" true}}
   </div>
-  <p class="muted small">{{t "Re-running replaces the list. Items with the same kind and name keep their images."}}</p>
+  <p class="muted small hint">{{t "Re-running replaces the list. Items with the same kind and name keep their images."}}</p>
   {{template "log" dict "ID" "log-vp"}}
   {{if $p.VisualsRaw}}
   <form method="post" action="{{$base}}/apply/visuals" class="raw-fix">
@@ -67,7 +69,7 @@
   </form>
   {{end}}
 
-  <form method="post" action="{{$base}}/style">
+  <form method="post" action="{{$base}}/style" data-save>
     <input type="hidden" name="back" value="{{$base}}#s3">
     <label>{{t "Global style"}} <span class="muted">{{t "(appended to every image prompt)"}}</span>
       <textarea name="style" rows="2">{{$p.Style}}</textarea>
@@ -85,7 +87,7 @@
   <div class="cards">
   {{range $p.Visuals}}{{$v := .}}{{$anchor := printf "%s#v-%s" $base .ID}}
     <article class="card" id="v-{{.ID}}">
-      <form method="post" action="{{$base}}/visuals/{{.ID}}" class="grid-form">
+      <form method="post" action="{{$base}}/visuals/{{.ID}}" data-save class="grid-form">
         <input type="hidden" name="back" value="{{$anchor}}">
         <label>{{t "Kind"}}
           <select name="kind">{{range visualKinds}}<option value="{{.}}" {{if eq . $v.Kind}}selected{{end}}>{{t .}}</option>{{end}}</select>
@@ -108,7 +110,7 @@
       {{template "refs" dict "P" $p "Target" (printf "visual:%s" .ID) "IDs" .ReferenceIDs "Label" "Conditioning references" "Primary" false "Back" $anchor "Empty" "None: text-to-image model is used."}}
     </article>
   {{else}}
-    <p class="muted">{{t "No visual items yet. Generate them from the story or add them by hand."}}</p>
+    <p class="empty">{{t "No visual items yet. Generate them from the story or add them by hand."}}</p>
   {{end}}
   </div>
   <form method="post" action="{{$base}}/visuals" class="inline">
@@ -125,7 +127,7 @@
     {{template "opts" dict "ID" "opts-sb" "Kind" "llm" "Stage" "storyboard"}}
     {{template "runbtn" dict "P" $p "Stage" "storyboard" "Target" "" "Label" "Generate shot list" "Opts" "opts-sb" "Log" "log-sb" "Primary" true}}
   </div>
-  <p class="muted small">{{t "Re-running replaces all shots (and their links to prompts and keyframes; the images stay in the library)."}}</p>
+  <p class="muted small hint">{{t "Re-running replaces all shots (and their links to prompts and keyframes; the images stay in the library)."}}</p>
   {{template "log" dict "ID" "log-sb"}}
   {{if $p.StoryboardRaw}}
   <form method="post" action="{{$base}}/apply/storyboard" class="raw-fix">
@@ -139,8 +141,8 @@
   <div class="shots">
   {{range $p.Shots}}{{$anchor := printf "%s#shot-%s" $base .ID}}
     <article class="shot" id="shot-{{.ID}}">
-      <div class="shot-num">#{{.Number}}</div>
-      <form method="post" action="{{$base}}/shots/{{.ID}}" class="shot-form">
+      <div class="shot-no">{{.Number}}</div>
+      <form method="post" action="{{$base}}/shots/{{.ID}}" data-save class="shot-form">
         <input type="hidden" name="back" value="{{$anchor}}">
         <label>{{t "Scene"}} <input name="scene" value="{{.Scene}}"></label>
         <label>{{t "Characters"}} <input name="characters" value="{{join .Characters ", "}}" placeholder="{{t "comma separated"}}"></label>
@@ -158,7 +160,7 @@
       </div>
     </article>
   {{else}}
-    <p class="muted">{{t "No shots yet."}}</p>
+    <p class="empty">{{t "No shots yet."}}</p>
   {{end}}
   </div>
   <form method="post" action="{{$base}}/shots" class="inline">
@@ -178,9 +180,9 @@
   {{range $p.Shots}}{{$anchor := printf "sp-%s" .ID}}
     <article class="card" id="sp-{{.ID}}">
       <header class="card-head">
-        <strong>#{{.Number}}</strong> <span class="muted">{{.Scene}}</span> — {{trunc .Action 120}}
+        <span class="shot-no">{{.Number}}</span> <strong>{{.Scene}}</strong> <span class="muted">{{trunc .Action 120}}</span>
       </header>
-      <form method="post" action="{{$base}}/shots/{{.ID}}" class="grid-form">
+      <form method="post" action="{{$base}}/shots/{{.ID}}" data-save class="grid-form">
         <input type="hidden" name="back" value="{{$base}}#{{$anchor}}">
         <label class="wide">{{t "Storyboard description"}} <textarea name="storyboard_prompt" rows="4">{{.StoryboardPrompt}}</textarea></label>
         <label class="wide">{{t "Keyframe prompt"}} <span class="muted">{{t "(English, used for image generation)"}}</span><textarea name="keyframe_prompt" rows="3">{{.KeyframePrompt}}</textarea></label>
@@ -193,7 +195,7 @@
       </div>
     </article>
   {{else}}
-    <p class="muted">{{t "Create the storyboard first."}}</p>
+    <p class="empty">{{t "Create the storyboard first."}}</p>
   {{end}}
   </div>
 </section>
@@ -210,7 +212,7 @@
   {{range $p.Shots}}{{$sh := .}}{{$anchor := printf "%s#kf-%s" $base .ID}}{{$refs := shotRefs $p $sh}}
     <article class="card" id="kf-{{.ID}}">
       <header class="card-head">
-        <strong>#{{.Number}}</strong> <span class="muted">{{.Duration}}s · {{.Camera}}</span>
+        <span class="shot-no">{{.Number}}</span> <strong>{{.Scene}}</strong> <span class="muted">{{.Duration}}s{{if .Camera}} · {{.Camera}}{{end}}</span>
       </header>
       <p class="prompt-preview">{{if .KeyframePrompt}}{{.KeyframePrompt}}{{else}}<span class="muted">{{t "No keyframe prompt yet: run step 5."}}</span>{{end}}</p>
       <div class="card-actions">
@@ -233,14 +235,17 @@
       </div>
     </article>
   {{else}}
-    <p class="muted">{{t "Create the storyboard first."}}</p>
+    <p class="empty">{{t "Create the storyboard first."}}</p>
   {{end}}
   </div>
 </section>
 
 <section class="stage danger-zone">
+  <span class="muted small">{{t "Deleting a project keeps its images in the asset library."}}</span>
   <form method="post" action="{{$base}}/delete" data-confirm="{{t "Delete this project? Its assets stay in the library."}}">
     <button class="btn danger">{{t "Delete project"}}</button>
   </form>
 </section>
+</div>
+</div>
 {{end}}

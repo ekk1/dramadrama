@@ -305,3 +305,26 @@ func TestBackRedirectValidation(t *testing.T) {
 		t.Errorf("withQuery: %s", got)
 	}
 }
+
+func TestProjectSteps(t *testing.T) {
+	p := &project.Project{Idea: "x"}
+	got := projectSteps(p)
+	if len(got) != 6 || got[0].State != "done" || got[1].State != "" || got[5].Info != "" {
+		t.Fatalf("empty project: %+v", got)
+	}
+	p.Story = "s"
+	p.Visuals = []project.VisualPrompt{{ID: "v1", AssetIDs: []string{"a"}}, {ID: "v2"}}
+	p.Shots = []project.Shot{{ID: "s1", KeyframePrompt: "k", KeyframeIDs: []string{"a"}}, {ID: "s2", KeyframePrompt: "k"}}
+	got = projectSteps(p)
+	want := []struct{ state, info string }{
+		{"done", ""}, {"done", ""}, {"partial", "1/2"}, {"done", "2"}, {"done", "2/2"}, {"partial", "1/2"},
+	}
+	for i, w := range want {
+		if got[i].State != w.state || got[i].Info != w.info {
+			t.Errorf("step %d: got %q %q, want %q %q", i+1, got[i].State, got[i].Info, w.state, w.info)
+		}
+	}
+	if initial(" 雨夜") != "雨" || initial("abc") != "A" || initial("") != "·" {
+		t.Error("initial")
+	}
+}

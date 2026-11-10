@@ -32,7 +32,7 @@
   </details>
 </section>
 
-<p class="muted small">{{len $d.Assets}} {{t "asset(s)"}}</p>
+<p class="muted small asset-count">{{len $d.Assets}} {{t "asset(s)"}}</p>
 <div class="asset-grid">
 {{range $d.Assets}}
   <article class="asset-card" id="a-{{.ID}}">
@@ -51,7 +51,7 @@
         {{if .Prompt}}<p class="small prompt-preview">{{.Prompt}}</p>{{end}}
         {{if .Model}}<p class="small muted">{{t "model"}}: {{.Model}}</p>{{end}}
         {{if .Parents}}<p class="small muted">{{t "inputs"}}: {{join .Parents ", "}}</p>{{end}}
-        <form method="post" action="/assets/{{.ID}}" class="grid-form">
+        <form method="post" action="/assets/{{.ID}}" data-save class="grid-form">
           <input type="hidden" name="back" value="/assets#a-{{.ID}}">
           <label>{{t "Name"}} <input name="name" value="{{.Name}}"></label>
           <label>{{t "Kind"}} <select name="kind">{{$k := .Kind}}{{range kinds}}<option value="{{.}}" {{if eq . $k}}selected{{end}}>{{t (printf "%s" .)}}</option>{{end}}</select></label>
@@ -68,7 +68,7 @@
     </div>
   </article>
 {{else}}
-  <p class="muted">{{t "No assets match."}}</p>
 {{end}}
 </div>
+{{if not $d.Assets}}<p class="empty">{{t "No assets match."}}</p>{{end}}
 {{end}}

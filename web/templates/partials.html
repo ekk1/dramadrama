@@ -21,8 +21,8 @@
       <a href="/assets/{{.ID}}/file" target="_blank" rel="noopener">
         {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
       </a>
+      {{if and $ctx.Primary (eq .ID $primary)}}<span class="thumb-badge">{{t "in use"}}</span>{{end}}
       <figcaption>
-        {{if and $ctx.Primary (eq .ID $primary)}}<span class="tag">{{t "in use"}}</span>{{end}}
         {{if and $ctx.Primary (ne .ID $primary)}}
         <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
           <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
@@ -76,7 +76,7 @@
 {{define "status"}}
 {{with run .P .Stage .Target}}
 <span class="status {{.Status}}" title="{{t .Error}}">
-  {{if eq .Status "running"}}{{t "running…"}}{{else if eq .Status "done"}}{{t "done"}}{{else}}{{t "error"}}{{end}}
+  <span class="chip">{{if eq .Status "running"}}{{t "running…"}}{{else if eq .Status "done"}}{{t "done"}}{{else}}{{t "error"}}{{end}}</span>
   <span class="muted">{{.When}}{{if .Model}} · {{.Model}}{{end}}</span>
   {{if eq .Status "error"}}<span class="err-text">{{trunc (t .Error) 160}}</span>{{end}}
 </span>

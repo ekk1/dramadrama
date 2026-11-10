@@ -1,6 +1,6 @@
 {{define "content"}}{{$d := .D}}
 <h1>{{t "Settings"}}</h1>
-<form method="post" action="/settings">
+<form method="post" action="/settings" data-save>
 <section class="stage">
   <h2>{{t "Providers"}}</h2>
   <p class="muted small">{{t "API keys can be stored in the config file or read from an environment variable. Stored keys are never shown again; leave the field empty to keep the current key."}}</p>
@@ -47,7 +47,7 @@
 <section class="stage">
   <h2>{{t "Default model per step"}}</h2>
   <p class="muted small">{{t "Each run can override provider and model on the project page. Temperature is optional and ignored by Anthropic."}}</p>
-  <table class="settings-table">
+  <div class="table-wrap"><table class="settings-table">
     <thead><tr><th>{{t "Step"}}</th><th>{{t "Provider"}}</th><th>{{t "Model"}}</th><th>{{t "Temperature"}}</th><th>{{t "Max tokens"}}</th><th>{{t "Send reference images"}}</th></tr></thead>
     <tbody>
     {{range llmStages}}{{$st := .}}{{$sm := index $d.Stages .}}
@@ -61,7 +61,7 @@
       </tr>
     {{end}}
     </tbody>
-  </table>
+  </table></div>
 </section>
 
 <section class="stage">
