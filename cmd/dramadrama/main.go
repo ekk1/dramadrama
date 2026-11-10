@@ -15,12 +15,13 @@ import (
 	"github.com/ekk1/dramadrama/internal/config"
 	"github.com/ekk1/dramadrama/internal/pipeline"
 	"github.com/ekk1/dramadrama/internal/project"
+	"github.com/ekk1/dramadrama/internal/reqlog"
 	"github.com/ekk1/dramadrama/internal/server"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
-	dataDir := flag.String("data", "data", "data directory (projects, assets, prompt overrides)")
+	dataDir := flag.String("data", "data", "data directory (projects, assets, prompt overrides, request log)")
 	cfgPath := flag.String("config", "", "config file (default <data>/config.json)")
 	devDir := flag.String("dev", "", "serve templates/static from this directory (e.g. ./web) and reload on each request")
 	flag.Parse()
@@ -51,10 +52,15 @@ func run(addr, dataDir, cfgPath, devDir string) error {
 		return err
 	}
 	prompts := &pipeline.Prompts{OverrideDir: filepath.Join(dataDir, "prompts")}
+	logs, err := reqlog.Open(filepath.Join(dataDir, "logs"))
+	if err != nil {
+		return err
+	}
 	pipe := pipeline.New(cfg, projects, lib, prompts)
+	pipe.Log = logs
 
 	h, err := server.New(server.Options{
-		Config: cfg, Projects: projects, Assets: lib, Pipeline: pipe, Prompts: prompts, DevDir: devDir,
+		Config: cfg, Projects: projects, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, DevDir: devDir,
 	})
 	if err != nil {
 		return err

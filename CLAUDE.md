@@ -59,7 +59,7 @@ gofmt -l .
 ```
 
 Runtime data goes to `data/` (gitignored): config with API keys, projects,
-assets, and prompt overrides. Keys come from `ANTHROPIC_API_KEY`,
+assets, prompt overrides, and the request log. Keys come from `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `GEMINI_API_KEY` or `FAL_KEY`, or are stored via Settings.
 
 ## Architecture
@@ -73,9 +73,12 @@ internal/assets    central asset library: index.json + files/<sha256><ext>
 internal/project   Project model + JSON store; Store.Update(id, fn) is the
                    only safe way to mutate (holds a lock across load/fn/save)
 internal/config    providers, per-stage models, image settings (file mode 0600)
+internal/reqlog    request log: one JSON file per model request under
+                   data/logs/<day>/; no index, the directory tree is the database
 internal/pipeline  stage implementations, Service.Run dispatch, prompt templates
                    (prompts/*.tmpl, overridable from data/prompts), JSON parsing
-internal/server    handlers, i18n, SSE run endpoint, settings, prompt editor
+internal/server    handlers, i18n, SSE run endpoint, settings, prompt editor,
+                   request log pages
 web/               embedded templates (layout, partials, pages) + static/app.{css,js}
 ```
 
@@ -99,6 +102,17 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     SSE events.
   - Runs are detached from the HTTP request (`context.WithoutCancel`), so
     closing the page doesn't stop them; the page has a stop button instead.
+- **Request log:**
+  - Every model request is logged through `Service.writeLog`: LLM calls
+    in `complete`, media generation in `generateImage`. A new kind of
+    request must be logged the same way, with a `callInfo` saying which
+    project, stage and item it is for.
+  - Entries hold the full prompt and output. They must never contain API
+    keys, and binary inputs are recorded as asset IDs. Generators expose
+    the body they send through `imagegen.PayloadDescriber`, with data
+    URIs redacted.
+  - The owner wants the filesystem to be the database: one file per
+    request, no index file. The server only lists, reads and deletes.
 - **Parsing LLM JSON:**
   - Always use `extractJSON`, which tolerates code fences and surrounding
     prose.

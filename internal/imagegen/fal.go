@@ -94,6 +94,41 @@ func (f *fal) payload(req *Request) map[string]any {
 	return p
 }
 
+// DescribePayload implements PayloadDescriber.
+func (f *fal) DescribePayload(req *Request) map[string]any {
+	return redactData(f.payload(req)).(map[string]any)
+}
+
+// redactData replaces data URIs anywhere in v with "data:<type>;base64,<n bytes>".
+func redactData(v any) any {
+	switch x := v.(type) {
+	case string:
+		if rest, ok := strings.CutPrefix(x, "data:"); ok {
+			meta, payload, _ := strings.Cut(rest, ",")
+			return fmt.Sprintf("data:%s,<%d bytes>", meta, base64.StdEncoding.DecodedLen(len(payload)))
+		}
+	case []string:
+		out := make([]any, len(x))
+		for i, s := range x {
+			out[i] = redactData(s)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = redactData(e)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = redactData(e)
+		}
+		return out
+	}
+	return v
+}
+
 func (f *fal) do(ctx context.Context, method, url string, body any, out any) error {
 	var rd io.Reader
 	if body != nil {

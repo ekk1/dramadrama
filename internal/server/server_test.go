@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/ekk1/dramadrama/internal/llm"
 	"github.com/ekk1/dramadrama/internal/pipeline"
 	"github.com/ekk1/dramadrama/internal/project"
+	"github.com/ekk1/dramadrama/internal/reqlog"
 )
 
 type fakeLLM struct{}
@@ -73,9 +75,11 @@ func newHarness(t *testing.T) *harness {
 	lib, _ := assets.Open(filepath.Join(dir, "assets"))
 	prompts := &pipeline.Prompts{OverrideDir: filepath.Join(dir, "prompts")}
 	pipe := pipeline.New(cfg, ps, lib, prompts)
+	logs, _ := reqlog.Open(filepath.Join(dir, "logs"))
+	pipe.Log = logs
 	pipe.NewLLM = func(*config.Provider) (llm.Client, error) { return fakeLLM{}, nil }
 	pipe.NewImage = func(*config.Provider) (imagegen.Generator, error) { return fakeImage{}, nil }
-	h, err := New(Options{Config: cfg, Projects: ps, Assets: lib, Pipeline: pipe, Prompts: prompts})
+	h, err := New(Options{Config: cfg, Projects: ps, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,5 +330,42 @@ func TestProjectSteps(t *testing.T) {
 	}
 	if initial(" 雨夜") != "雨" || initial("abc") != "A" || initial("") != "·" {
 		t.Error("initial")
+	}
+}
+
+func TestRequestLogPages(t *testing.T) {
+	h := newHarness(t)
+	if page := h.get("/logs"); !strings.Contains(page, "Nothing recorded yet.") {
+		t.Fatal("empty log page")
+	}
+	u := h.post("/projects", url.Values{"name": {"Logged"}, "idea": {"a quiet idea"}})
+	pid := strings.TrimPrefix(u.Path, "/projects/")
+	h.run(pid, "idea", "")
+
+	page := h.get("/logs?project=" + pid)
+	m := regexp.MustCompile(`href="(/logs/\d{4}-\d{2}-\d{2}/[0-9._a-z-]+)"`).FindStringSubmatch(page)
+	if m == nil || !strings.Contains(page, "Idea expansion") || !strings.Contains(page, "Logged") {
+		t.Fatalf("log list: %s", page)
+	}
+	if page := h.get("/logs?kind=image"); strings.Contains(page, m[1]) {
+		t.Error("kind filter not applied")
+	}
+	detail := h.get(m[1])
+	for _, want := range []string{"System prompt", "a quiet idea", "senior screenwriter", "claude-opus-5-5"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail page missing %q", want)
+		}
+	}
+	if raw := h.get(m[1] + "?raw=1"); !strings.Contains(raw, `"kind": "llm"`) {
+		t.Errorf("raw: %s", raw)
+	}
+	resp, _ := h.c.Get(h.srv.URL + "/logs/2026-01-01/nope")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown entry: %d", resp.StatusCode)
+	}
+	h.post("/logs/delete", url.Values{"all": {"1"}})
+	if page := h.get("/logs"); !strings.Contains(page, "Nothing recorded yet.") {
+		t.Error("log not cleared")
 	}
 }

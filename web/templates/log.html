@@ -1,0 +1,40 @@
+{{define "content"}}{{$e := .D}}
+<header class="project-head">
+  <a class="crumb" href="/logs?day={{$e.Day}}">{{t "← Request log"}}</a>
+  <h1>{{t (logKind $e.Kind)}} · {{t (stageName $e.Stage)}}{{if $e.Label}} · {{t $e.Label}}{{end}}</h1>
+  <p class="project-meta">
+    <span class="status {{if eq $e.Status "ok"}}done{{else}}error{{end}}"><span class="chip">{{t $e.Status}}</span></span>
+    <span>{{time $e.Time}}:{{second $e.Time}}</span>
+    <span>{{duration $e.DurationMS}}</span>
+    <span>{{$e.Provider}} / {{$e.Model}}</span>
+    {{if $e.ProjectID}}<a href="/projects/{{$e.ProjectID}}">{{if $e.Project}}{{$e.Project}}{{else}}{{t "(deleted project)"}}{{end}}</a>{{end}}
+    <a class="link" href="/logs/{{$e.Day}}/{{$e.Name}}?raw=1">{{t "download JSON"}}</a>
+  </p>
+</header>
+{{if $e.Error}}<div class="flash error" role="alert">{{t $e.Error}}</div>{{end}}
+
+<div class="log-cols">
+  <section class="stage">
+    <h2>{{t "Request"}}</h2>
+    {{range $e.Request}}
+    <h4>{{t .Label}}</h4>
+    <pre class="log-text {{if .Code}}mono{{end}}">{{.Text}}</pre>
+    {{end}}
+    {{if $e.Inputs}}
+    <h4>{{t "Input images"}}</h4>
+    <div class="thumbs mini">{{range $e.Inputs}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
+    {{end}}
+  </section>
+  <section class="stage">
+    <h2>{{t "Response"}}</h2>
+    {{range $e.Response}}
+    <h4>{{t .Label}}</h4>
+    <pre class="log-text {{if .Code}}mono{{end}}">{{.Text}}</pre>
+    {{else}}<p class="muted">{{t "No response was received."}}</p>{{end}}
+    {{if $e.Outputs}}
+    <h4>{{t "Output"}}</h4>
+    <div class="thumbs">{{range $e.Outputs}}{{with asset .}}<figure class="thumb"><a href="/assets/{{.ID}}/file" target="_blank" rel="noopener">{{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted controls></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}</a></figure>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
+    {{end}}
+  </section>
+</div>
+{{end}}

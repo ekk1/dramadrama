@@ -44,6 +44,13 @@ func TestTemplateKeysTranslated(t *testing.T) {
 	goKeys = append(goKeys, "character", "scene", "prop", "style", "Saved",
 		"Input", "Story", "Visuals", "Storyboard", "Shot prompts", "Keyframes", "upload too large (limit 64 MB)",
 		"Project deleted. Its assets remain in the library.", "interrupted (server restarted)")
+	for _, k := range logKindNames {
+		goKeys = append(goKeys, k)
+	}
+	for _, k := range stageNames {
+		goKeys = append(goKeys, k)
+	}
+	goKeys = append(goKeys, "ok", "error", "System prompt", "User prompt", "Prompt", "Output", "Parameters", "Details")
 	goKeys = append(goKeys, jsKeys...)
 	for _, k := range goKeys {
 		if _, ok := zh[k]; !ok {

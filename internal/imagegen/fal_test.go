@@ -92,3 +92,21 @@ func TestFalError(t *testing.T) {
 		t.Fatalf("expected 422 error, got %v", err)
 	}
 }
+
+func TestFalDescribePayload(t *testing.T) {
+	g, _ := New(Options{Type: TypeFal, APIKey: "secret"})
+	d := g.(PayloadDescriber).DescribePayload(&Request{
+		Model: "m", Prompt: "a cat", AspectRatio: "9:16",
+		References: []Image{{MIME: "image/png", Data: make([]byte, 3000)}, {URL: "https://example.com/a.png"}},
+	})
+	b, _ := json.Marshal(d)
+	got := string(b)
+	for _, want := range []string{`"prompt":"a cat"`, `data:image/png;base64,\u003c3000 bytes\u003e`, `https://example.com/a.png`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("payload %s missing %s", got, want)
+		}
+	}
+	if strings.Contains(got, "secret") || len(got) > 600 {
+		t.Errorf("payload not redacted: %d bytes", len(got))
+	}
+}
