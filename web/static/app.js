@@ -3,6 +3,9 @@
 //  - run buttons stream step output (Server-Sent Events over fetch)
 //  - asset picker dialog for attaching library assets
 //  - scroll position kept across form posts / reloads
+//  - unsaved edits are marked, and saved automatically before a run or
+//    another form post would reload the page and lose them
+//  - step navigation highlights the section in view
 //  - confirm prompts, auto-submit uploads, dismissible flash messages
 "use strict";
 
@@ -26,6 +29,44 @@
   });
 
   // ---------------------------------------------------------------- forms
+  // The page is made of many small forms that each save one thing. Edits in
+  // a form are tracked ("dirty") so they are not lost when something else
+  // reloads the page: dirty forms are posted in the background first.
+  // Only forms marked data-save (plain "edit and save" forms) take part.
+  function tracked(form) { return !!form && form.hasAttribute("data-save"); }
+  document.addEventListener("input", (ev) => {
+    const form = ev.target.form;
+    if (tracked(form)) form.classList.add("dirty");
+  });
+
+  // saveDirty posts every dirty form except `skip`. It resolves to false
+  // (after telling the user) if a save failed.
+  async function saveDirty(skip) {
+    for (const form of document.querySelectorAll("form.dirty")) {
+      if (form === skip) continue;
+      try {
+        // getAttribute: a field named "action" would shadow form.action.
+        const resp = await fetch(form.getAttribute("action"), { method: "POST", body: new URLSearchParams(new FormData(form)) });
+        const err = new URL(resp.url).searchParams.get("err");
+        if (!resp.ok || err) throw new Error(err || resp.statusText);
+        form.classList.remove("dirty");
+      } catch (err) {
+        form.scrollIntoView({ block: "center" });
+        alert(T("Could not save your edits: ") + err.message);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // submitForm saves other dirty forms, then submits `form` natively.
+  async function submitForm(form) {
+    if (!(await saveDirty(form))) return;
+    form.classList.remove("dirty");
+    saveScroll();
+    form.submit();
+  }
+
   document.addEventListener("submit", (ev) => {
     const form = ev.target;
     if (form.dataset.confirm && !confirm(form.dataset.confirm)) {
@@ -37,15 +78,23 @@
       runStep(form);
       return;
     }
-    if ((form.method || "").toLowerCase() === "post") saveScroll();
+    if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
+    if (ev.submitter && ev.submitter.hasAttribute("formaction")) { // e.g. "reset to default"
+      form.classList.remove("dirty");
+      saveScroll();
+      return;
+    }
+    ev.preventDefault();
+    submitForm(form);
   });
 
   document.addEventListener("change", (ev) => {
     const el = ev.target;
-    if (el.matches("input[type=file][data-autosubmit]") && el.files.length) {
-      saveScroll();
-      el.form.submit();
-    }
+    if (el.matches("input[type=file][data-autosubmit]") && el.files.length) submitForm(el.form);
+  });
+
+  window.addEventListener("beforeunload", (ev) => {
+    if (document.querySelector("form.dirty")) ev.preventDefault();
   });
 
   document.addEventListener("click", (ev) => {
@@ -115,6 +164,7 @@
   });
 
   async function runStep(form) {
+    if (!(await saveDirty())) return; // the run reads saved data, and reloads the page
     const fd = new FormData(form);
     const optsId = form.dataset.opts;
     if (optsId) {
@@ -203,6 +253,21 @@
     location.reload();
   }
 
+  // ---------------------------------------------------------------- step nav
+  const steps = [...document.querySelectorAll(".stepper .step")];
+  if (steps.length && "IntersectionObserver" in window) {
+    const visible = new Set();
+    const mark = () => {
+      const first = steps.find((a) => visible.has(a.hash.slice(1))) || null;
+      steps.forEach((a) => a.classList.toggle("current", a === first));
+    };
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) e.isIntersecting ? visible.add(e.target.id) : visible.delete(e.target.id);
+      mark();
+    }, { rootMargin: "-25% 0px -55% 0px" });
+    steps.forEach((a) => { const sec = document.getElementById(a.hash.slice(1)); if (sec) io.observe(sec); });
+  }
+
   // ---------------------------------------------------------------- picker
   const picker = document.getElementById("picker");
   if (picker) {
@@ -254,8 +319,8 @@
         form.appendChild(input);
       }
       document.body.appendChild(form);
-      saveScroll();
-      form.submit();
+      picker.close();
+      submitForm(form);
     }
 
     document.addEventListener("click", (ev) => {

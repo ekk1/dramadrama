@@ -119,7 +119,7 @@ var zhPatterns = []pattern{
 // jsKeys are the strings app.js needs; they are passed to the page as a map.
 var jsKeys = []string{
 	"Running…", "Loading…", "No assets found.", "Failed to load: ", "Failed: ",
-	"done", "finished",
+	"done", "finished", "Could not save your edits: ",
 }
 
 func jsStrings(tr func(string) string) map[string]string {
@@ -187,18 +187,20 @@ var zh = map[string]string{
 	"stopped":                        "已停止",
 
 	// Project page
-	"← Projects":     "← 项目",
-	"Steps":          "步骤",
-	"1 Input":        "1 输入",
-	"2 Story":        "2 故事",
-	"3 Visuals":      "3 视觉",
-	"4 Storyboard":   "4 分镜",
-	"5 Shot prompts": "5 镜头提示词",
-	"6 Keyframes":    "6 关键帧",
-	"Input":          "输入",
-	"Project name":   "项目名称",
-	"Aspect ratio":   "画幅比例",
-	"Core idea":      "核心创意",
+	"← Projects":   "← 项目",
+	"Steps":        "步骤",
+	"Visuals":      "视觉",
+	"Storyboard":   "分镜",
+	"Shot prompts": "镜头提示词",
+	"From a one-line idea to story, concept art, storyboard and keyframes. Every step runs only when you click it.": "从一句话创意到故事、概念图、分镜和关键帧。每一步都只在你点击时运行。",
+	"Deleting a project keeps its images in the asset library.":                                                     "删除项目后，其图片仍保留在素材库中。",
+	"Could not save your edits: ":    "无法保存你的修改：",
+	"upload too large (limit 64 MB)": "上传内容过大（上限 64 MB）",
+	"Warning: the stream ended without a finish reason; the output may be incomplete.": "警告：输出流在没有结束标记的情况下中断，内容可能不完整。",
+	"Input":        "输入",
+	"Project name": "项目名称",
+	"Aspect ratio": "画幅比例",
+	"Core idea":    "核心创意",
 	"Describe the concept in a few sentences…": "用几句话描述你的创意…",
 	"Requirements": "要求",
 	"(optional: episode length, number of shots, tone, audience, …)": "（可选：单集时长、镜头数量、基调、受众等）",

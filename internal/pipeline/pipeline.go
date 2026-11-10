@@ -236,6 +236,10 @@ func (s *Service) complete(ctx context.Context, sm config.StageModel, system, us
 	switch strings.ToLower(resp.FinishReason) {
 	case "length", "max_tokens", "max_output_tokens":
 		emit(Event{Type: "status", Text: "Warning: the output hit the token limit and may be truncated."})
+	case "":
+		// Every provider reports a finish reason at the end of a complete
+		// stream; none means the connection closed early.
+		emit(Event{Type: "status", Text: "Warning: the stream ended without a finish reason; the output may be incomplete."})
 	}
 	if strings.TrimSpace(resp.Text) == "" {
 		return "", fmt.Errorf("model returned no text (finish reason %q)", resp.FinishReason)

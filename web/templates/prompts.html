@@ -1,10 +1,12 @@
 {{define "content"}}{{$d := .D}}
+<header class="page-head">
 <h1>{{t "Prompt templates"}}</h1>
 <p class="muted">{{t "These Go text/template files build every LLM request. Edits are saved as overrides in"}} <code>{{$d.Dir}}</code> {{t "and take effect on the next run. Available data:"}} <code>.P</code> {{t "(project: Idea, Requirements, Story, Style, Visuals, Shots, AspectRatio)"}}, <code>.Shot</code>, <code>.Prev</code>, <code>.Next</code>, <code>.ImageCount</code>; {{t "function"}} <code>join</code>.</p>
+</header>
 {{range $d.List}}
 <section class="stage" id="p-{{.Name}}">
   <h2>{{.Name}} {{if .Overridden}}<span class="tag">{{t "customised"}}</span>{{end}}</h2>
-  <form method="post" action="/prompts/{{.Name}}">
+  <form method="post" action="/prompts/{{.Name}}" data-save>
     <textarea name="source" rows="12" class="mono" aria-label="{{.Name}}">{{.Source}}</textarea>
     <div class="actions">
       <button class="btn">{{t "Save"}}</button>

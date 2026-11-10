@@ -1,20 +1,28 @@
 {{define "content"}}
-<h1>{{t "Projects"}}</h1>
-<section class="stage">
+<header class="page-head">
+  <h1>{{t "Projects"}}</h1>
+  <p class="muted">{{t "From a one-line idea to story, concept art, storyboard and keyframes. Every step runs only when you click it."}}</p>
+</header>
+<section class="stage new-project">
   <h2>{{t "New project"}}</h2>
   <form method="post" action="/projects" class="grid-form">
     <label>{{t "Name"}} <input name="name" placeholder="{{t "Untitled"}}"></label>
-    <label class="wide">{{t "Core idea"}} <textarea name="idea" rows="3" placeholder="{{t "What is the drama about?"}}"></textarea></label>
+    <label>{{t "Core idea"}} <textarea name="idea" rows="3" placeholder="{{t "What is the drama about?"}}"></textarea></label>
     <div class="wide actions"><button class="btn primary">{{t "Create"}}</button></div>
   </form>
 </section>
+{{if .D}}<h2 class="section-title">{{t "All projects"}} · {{len .D}}</h2>{{end}}
 <div class="project-list">
 {{range .D}}
   <a class="project-card" href="/projects/{{.ID}}">
-    <div class="pc-thumb">{{if .Thumb}}<img src="/assets/{{.Thumb}}/file" alt="" loading="lazy">{{end}}</div>
+    <div class="pc-thumb">
+      {{if .Thumb}}<img src="/assets/{{.Thumb}}/file" alt="" loading="lazy">{{else}}<span class="pc-initial" aria-hidden="true">{{initial .Name}}</span>{{end}}
+      <span class="pc-ratio">{{.AspectRatio}}</span>
+    </div>
     <div class="pc-body">
       <strong>{{.Name}}</strong>
-      <p class="muted small">{{trunc .Idea 140}}</p>
+      <p class="muted small pc-idea">{{trunc .Idea 140}}</p>
+      <div class="pc-steps" aria-hidden="true">{{range steps .Project}}<i class="{{.State}}"></i>{{end}}</div>
       <p class="pc-progress small">
         <span class="{{if .Story}}ok{{end}}">{{t "story"}}</span>
         <span class="{{if .Visuals}}ok{{end}}">{{len .Visuals}} {{t "visuals"}}</span>
@@ -24,8 +32,7 @@
       <p class="muted small">{{t "Updated"}} {{time .UpdatedAt}}</p>
     </div>
   </a>
-{{else}}
-  <p class="muted">{{t "No projects yet."}}</p>
 {{end}}
 </div>
+{{if not .D}}<p class="empty">{{t "No projects yet."}}</p>{{end}}
 {{end}}
