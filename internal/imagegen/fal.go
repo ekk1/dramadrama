@@ -27,6 +27,8 @@ type fal struct {
 	apiKey  string
 	headers map[string]string
 	poll    time.Duration
+	// pagePause is the delay between pages when listing models.
+	pagePause time.Duration
 }
 
 func newFal(o Options) *fal {
@@ -42,7 +44,7 @@ func newFal(o Options) *fal {
 	if poll <= 0 {
 		poll = time.Second
 	}
-	return &fal{http: hc, baseURL: base, apiKey: o.APIKey, headers: o.Headers, poll: poll}
+	return &fal{http: hc, baseURL: base, apiKey: o.APIKey, headers: o.Headers, poll: poll, pagePause: poll / 10}
 }
 
 // falImageSize maps an aspect ratio to fal's image_size enum used by FLUX

@@ -33,7 +33,7 @@
 {{template "content" .}}
 </main>
 
-<dialog id="picker">
+<dialog id="picker" class="modal">
   <form method="dialog" class="picker-head">
     <strong>{{t "Pick from asset library"}}</strong>
     <select id="picker-scope" aria-label="{{t "Project"}}">
@@ -48,6 +48,18 @@
     <button value="cancel" class="btn small">{{t "Close"}}</button>
   </form>
   <div id="picker-grid" class="picker-grid"></div>
+</dialog>
+
+<dialog id="model-picker" class="modal">
+  <div class="picker-head">
+    <strong>{{t "Choose a model"}}</strong>
+    <span class="tag accent" id="mp-provider"></span>
+    <select id="mp-cat" aria-label="{{t "Category"}}" hidden></select>
+    <input id="mp-q" type="search" placeholder="{{t "Search models"}}" aria-label="{{t "Search models"}}">
+    <button type="button" class="btn small" data-close>{{t "Close"}}</button>
+  </div>
+  <div class="mp-info muted small"><span id="mp-info"></span> <button type="button" class="link" id="mp-refresh"></button></div>
+  <div id="mp-list" class="model-list"></div>
 </dialog>
 </body>
 </html>{{end}}

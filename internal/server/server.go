@@ -5,6 +5,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ekk1/dramadrama/internal/assets"
+	"github.com/ekk1/dramadrama/internal/catalog"
 	"github.com/ekk1/dramadrama/internal/config"
 	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
@@ -35,6 +37,7 @@ type Options struct {
 	Pipeline *pipeline.Service
 	Prompts  *pipeline.Prompts
 	Logs     *reqlog.Store
+	Models   *catalog.Store
 	// DevDir, when set, serves templates and static files from this
 	// directory on disk (re-parsed per request) instead of the embedded copy.
 	DevDir string
@@ -48,8 +51,11 @@ type Server struct {
 	pipe     *pipeline.Service
 	prompts  *pipeline.Prompts
 	logs     *reqlog.Store
-	files    fs.FS
-	dev      bool
+	models   *catalog.Store
+	// fetchModels downloads a provider's model list; replaceable in tests.
+	fetchModels func(ctx context.Context, p *config.Provider) ([]catalog.Model, error)
+	files       fs.FS
+	dev         bool
 
 	mu    sync.Mutex
 	pages map[string]*template.Template
@@ -59,7 +65,7 @@ type Server struct {
 // New builds the server and parses the templates.
 func New(o Options) (*Server, error) {
 	s := &Server{
-		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts, logs: o.Logs,
+		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts, logs: o.Logs, models: o.Models, fetchModels: catalog.Fetch,
 		files: web.FS, pages: map[string]*template.Template{},
 	}
 	if o.DevDir != "" {
@@ -114,7 +120,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /logs/delete", s.handleDeleteLogs)
 
 	m.HandleFunc("GET /settings", s.handleSettings)
-	m.HandleFunc("POST /settings", s.handleSaveSettings)
+	m.HandleFunc("POST /settings/providers", s.handleSaveProvider)
+	m.HandleFunc("POST /settings/providers/delete", s.handleDeleteProvider)
+	m.HandleFunc("POST /settings/providers/models", s.handleFetchModels)
+	m.HandleFunc("POST /settings/stages", s.handleSaveStages)
+	m.HandleFunc("POST /settings/image", s.handleSaveImage)
+	m.HandleFunc("GET /api/models", s.handleAPIModels)
 	m.HandleFunc("GET /lang/{lang}", s.handleLang)
 	m.HandleFunc("GET /prompts", s.handlePrompts)
 	m.HandleFunc("POST /prompts/{name}", s.handleSavePrompt)

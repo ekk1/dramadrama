@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -265,5 +266,60 @@ func TestStreamEarlyBreak(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("got %d chunks", n)
+	}
+}
+
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == "/oa/models" && r.Header.Get("Authorization") == "Bearer k":
+			w.Write([]byte(`{"object":"list","data":[{"id":"gpt-b"},{"id":"gpt-a"}]}`))
+		case r.URL.Path == "/an/v1/models" && r.Header.Get("x-api-key") == "k" && r.Header.Get("anthropic-version") != "":
+			if q.Get("after_id") == "" {
+				w.Write([]byte(`{"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5"}],"has_more":true,"last_id":"claude-opus-5-5"}`))
+				return
+			}
+			w.Write([]byte(`{"data":[{"id":"claude-haiku-5-5","display_name":"Claude Haiku 5.5"}],"has_more":false,"last_id":"claude-haiku-5-5"}`))
+		case r.URL.Path == "/gm/models" && r.Header.Get("x-goog-api-key") == "k":
+			if q.Get("pageToken") == "" {
+				w.Write([]byte(`{"models":[{"name":"models/gemini-pro","displayName":"Gemini Pro","description":"d","supportedGenerationMethods":["generateContent"]},
+					{"name":"models/embedding-1","supportedGenerationMethods":["embedContent"]}],"nextPageToken":"t2"}`))
+				return
+			}
+			w.Write([]byte(`{"models":[{"name":"models/gemini-flash","supportedGenerationMethods":["generateContent","countTokens"]}]}`))
+		default:
+			http.Error(w, `{"error":"nope"}`, http.StatusUnauthorized)
+		}
+	}))
+	defer srv.Close()
+	cases := []struct{ typ, base, want string }{
+		{TypeOpenAIChat, "/oa", "gpt-a gpt-b"},
+		{TypeOpenAIResponses, "/oa", "gpt-a gpt-b"},
+		{TypeAnthropic, "/an", "claude-haiku-5-5 claude-opus-5-5"},
+		{TypeGemini, "/gm", "gemini-flash gemini-pro"},
+	}
+	for _, c := range cases {
+		list, err := ListModels(context.Background(), Options{Type: c.typ, BaseURL: srv.URL + c.base, APIKey: "k"})
+		if err != nil {
+			t.Errorf("%s: %v", c.typ, err)
+			continue
+		}
+		var ids []string
+		for _, m := range list {
+			ids = append(ids, m.ID)
+		}
+		if got := strings.Join(ids, " "); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.typ, got, c.want)
+		}
+	}
+	list, _ := ListModels(context.Background(), Options{Type: TypeAnthropic, BaseURL: srv.URL + "/an", APIKey: "k"})
+	if len(list) != 2 || list[1].Name != "Claude Opus 5.5" {
+		t.Errorf("display names: %+v", list)
+	}
+	// A bad key surfaces the provider's error.
+	var apiErr *APIError
+	if _, err := ListModels(context.Background(), Options{Type: TypeAnthropic, BaseURL: srv.URL + "/an", APIKey: "bad"}); !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
+		t.Errorf("want 401 APIError, got %v", err)
 	}
 }

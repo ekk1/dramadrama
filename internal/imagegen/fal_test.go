@@ -110,3 +110,46 @@ func TestFalDescribePayload(t *testing.T) {
 		t.Errorf("payload not redacted: %d bytes", len(got))
 	}
 }
+
+func TestFalListModels(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Key secret" {
+			http.NotFound(w, r)
+			return
+		}
+		queries = append(queries, r.URL.RawQuery)
+		if r.URL.Query().Get("cursor") == "" {
+			w.Write([]byte(`{"models":[
+				{"endpoint_id":"fal-ai/flux/dev","metadata":{"display_name":"FLUX.1 [dev]","category":"text-to-image","description":"Fast","status":"active"}},
+				{"endpoint_id":"fal-ai/whisper","metadata":{"display_name":"Whisper","category":"speech-to-text","status":"active"}},
+				{"endpoint_id":"fal-ai/old","metadata":{"display_name":"Old","category":"text-to-image","status":"deprecated"}}],
+				"next_cursor":"p2","has_more":true}`))
+			return
+		}
+		w.Write([]byte(`{"models":[
+			{"endpoint_id":"minimax/h3-max/reference-to-video","metadata":{"display_name":"H3 Max","category":"image-to-video","status":"active"}},
+			{"endpoint_id":"fal-ai/flux/dev","metadata":{"display_name":"dup","category":"text-to-image"}},
+			{"endpoint_id":"acme/no-metadata"}],
+			"next_cursor":null,"has_more":false}`))
+	}))
+	defer srv.Close()
+	list, err := ListModels(context.Background(), Options{Type: TypeFal, APIKey: "secret", CatalogURL: srv.URL + "/v1", PollInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range list {
+		ids = append(ids, m.ID+"|"+m.Category)
+	}
+	want := "acme/no-metadata| minimax/h3-max/reference-to-video|image-to-video fal-ai/flux/dev|text-to-image"
+	if got := strings.Join(ids, " "); got != want {
+		t.Errorf("models:\n got %s\nwant %s", got, want)
+	}
+	if list[2].Name != "FLUX.1 [dev]" || list[2].Description != "Fast" {
+		t.Errorf("metadata: %+v", list[2])
+	}
+	if len(queries) != 2 || queries[0] != "status=active" || queries[1] != "cursor=p2&status=active" {
+		t.Errorf("queries: %v", queries)
+	}
+}

@@ -74,6 +74,9 @@ var zhPatterns = []pattern{
 	pat(`^Generating with (.+) / (.+) \((\d+) reference image\(s\)\)…$`, func(m []string, _ func(string) string) string {
 		return "正在使用 " + m[1] + " / " + m[2] + " 生成（" + m[3] + " 张参考图）…"
 	}),
+	pat(`^Fetched (\d+) models from (.+)$`, func(m []string, _ func(string) string) string {
+		return "已从 " + m[2] + " 拉取 " + m[1] + " 个模型"
+	}),
 	pat(`^Shot (\d+)$`, func(m []string, _ func(string) string) string { return "镜头 " + m[1] }),
 	pat(`^Could not write the request log: (.*)$`, func(m []string, _ func(string) string) string {
 		return "无法写入请求日志：" + m[1]
@@ -124,6 +127,9 @@ var zhPatterns = []pattern{
 var jsKeys = []string{
 	"Running…", "Loading…", "No assets found.", "Failed to load: ", "Failed: ",
 	"done", "finished", "Could not save your edits: ",
+	"No model list yet. Fetch it from the provider first.", "No models match.",
+	"Showing the first 300; type to narrow down.", "All categories", "Refresh",
+	"Select a provider first.", "Fetch model list", "Fetching…", "models", "Updated",
 }
 
 func jsStrings(tr func(string) string) map[string]string {
@@ -136,9 +142,38 @@ func jsStrings(tr func(string) string) map[string]string {
 
 // zh is the Simplified Chinese dictionary.
 var zh = map[string]string{
-	"Logs":          "日志",
-	"Request log":   "请求日志",
-	"← Request log": "← 请求日志",
+	"Language models":           "语言模型",
+	"Language model providers":  "语言模型服务商",
+	"Image and video providers": "图像与视频服务商",
+	"+ Add provider":            "+ 新增服务商",
+	"API keys can be stored in the config file or read from an environment variable. Stored keys are never shown again.": "API 密钥可以保存在配置文件中，也可以从环境变量读取。已保存的密钥不会再显示。",
+	"key stored":             "密钥已保存",
+	"no key":                 "缺少密钥",
+	"no key needed":          "无需密钥",
+	"models":                 "个模型",
+	"model list not fetched": "未拉取模型列表",
+	"The model list has not been fetched yet.": "还没有拉取模型列表。",
+	"Fetch model list":                         "拉取模型列表",
+	"Delete":                                   "删除",
+	"Cancel":                                   "取消",
+	"Delete this provider? Steps that use it will have no provider.": "删除这个服务商？使用它的步骤将没有服务商。",
+	"Fetching…":                             "拉取中…",
+	"Choose from the provider's model list": "从服务商的模型列表中选择",
+	"Browse":                                "选择",
+	"Choose a model":                        "选择模型",
+	"Category":                              "分类",
+	"Search models":                         "搜索模型",
+	"No model list yet. Fetch it from the provider first.": "还没有模型列表，请先从服务商拉取。",
+	"No models match.": "没有匹配的模型。",
+	"Showing the first 300; type to narrow down.": "仅显示前 300 个，请输入关键词缩小范围。",
+	"All categories":                  "全部分类",
+	"Refresh":                         "刷新",
+	"Select a provider first.":        "请先选择服务商。",
+	"provider not found":              "找不到该服务商",
+	"the provider returned no models": "服务商没有返回任何模型",
+	"Logs":                            "日志",
+	"Request log":                     "请求日志",
+	"← Request log":                   "← 请求日志",
 	"Every LLM call and media generation is recorded as one JSON file, with the full prompt and output. API keys and image data are never stored.": "每次 LLM 调用和媒体生成都会记录为一个 JSON 文件，包含完整的提示词和输出。API 密钥和图片数据不会被保存。",
 	"Days":                          "日期",
 	"Nothing recorded yet.":         "还没有记录。",

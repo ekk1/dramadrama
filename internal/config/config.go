@@ -44,6 +44,10 @@ type Provider struct {
 	APIKey    string            `json:"api_key,omitempty"`
 	APIKeyEnv string            `json:"api_key_env,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+	// CatalogURL overrides where the model list is fetched from, for
+	// providers whose catalogue lives on another host (fal). Empty means
+	// the provider's public endpoint. Only set by hand in the config file.
+	CatalogURL string `json:"catalog_url,omitempty"`
 }
 
 // Key resolves the provider's API key.
@@ -219,6 +223,25 @@ func (m *Manager) Save(c *Config) error {
 		return err
 	}
 	m.cfg = c.clone()
+	return nil
+}
+
+// Update applies fn to a copy of the configuration, then validates and
+// persists it. If fn or validation fails nothing changes.
+func (m *Manager) Update(fn func(*Config) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cfg.clone()
+	if err := fn(c); err != nil {
+		return err
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if err := m.write(c); err != nil {
+		return err
+	}
+	m.cfg = c
 	return nil
 }
 

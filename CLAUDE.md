@@ -15,9 +15,9 @@ human-triggered pipeline (no node graphs, nothing runs automatically):
 5. Shot-level prompts (LLM)
 6. Keyframes (fal.ai)
 
-**Status:** stage 1 is complete (merged PRs #1 and #2). The full pipeline,
-the asset library, the web UI and a zh/en interface all exist. Nothing has
-been run against real provider APIs yet; all tests use fakes.
+**Status:** the full pipeline, the asset library, the web UI (zh/en), a
+request log and per-provider model lists exist. Nothing has been run
+against real provider APIs yet; all tests use fakes.
 
 ## Working agreements with the owner
 
@@ -59,7 +59,7 @@ gofmt -l .
 ```
 
 Runtime data goes to `data/` (gitignored): config with API keys, projects,
-assets, prompt overrides, and the request log. Keys come from `ANTHROPIC_API_KEY`,
+assets, prompt overrides, cached model lists, and the request log. Keys come from `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `GEMINI_API_KEY` or `FAL_KEY`, or are stored via Settings.
 
 ## Architecture
@@ -73,6 +73,8 @@ internal/assets    central asset library: index.json + files/<sha256><ext>
 internal/project   Project model + JSON store; Store.Update(id, fn) is the
                    only safe way to mutate (holds a lock across load/fn/save)
 internal/config    providers, per-stage models, image settings (file mode 0600)
+internal/catalog   model lists fetched from providers, cached one file per
+                   provider under data/models/; Fetch dispatches to llm/imagegen
 internal/reqlog    request log: one JSON file per model request under
                    data/logs/<day>/; no index, the directory tree is the database
 internal/pipeline  stage implementations, Service.Run dispatch, prompt templates
@@ -150,6 +152,24 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   - API keys are never rendered back to the page.
   - `back` redirect targets must pass `back()` validation (local paths
     only).
+- **Settings and model lists:**
+  - The settings page has tabs (`?tab=`). Each tab saves through its own
+    endpoint with `config.Manager.Update`, which applies a function to a
+    copy and validates before writing. Providers are edited one at a
+    time in a dialog; renaming or deleting one goes through
+    `renameProvider`, which must cover every setting that names a
+    provider.
+  - Model lists are fetched only when the user asks (provider dialog or
+    the model picker) and cached by `catalog.Store`. Nothing is fetched
+    automatically.
+  - fal's catalogue is on `api.fal.ai`, a different host from the queue.
+    `Provider.CatalogURL` overrides it; it is set only in the config
+    file. The response shape was taken from fal's docs and has not been
+    exercised against the live API.
+  - Every model ID input uses the `modelfield` partial inside a
+    `[data-model-scope]` that contains the `select[data-provider]`.
+  - Dialogs are `<dialog class="modal">`, opened with `data-dialog="id"`
+    and closed with `data-close`.
 - **Frontend conventions:**
   - Colours, radii and shadows are CSS custom properties at the top of
     `app.css`, with a dark set under `prefers-color-scheme: dark`. Use the
@@ -173,9 +193,10 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
 ## Adding things
 
 - **New LLM provider:**
-  1. Implement `llm.Client` in `internal/llm`.
+  1. Implement `llm.Client` in `internal/llm`, and `listModels` in
+     `models.go`.
   2. Add its type constant, `Types` entry and `New` case.
-  3. Add a fake-server test in `llm_test.go`.
+  3. Add fake-server tests in `llm_test.go`.
 - **New image provider:** same pattern in `internal/imagegen`.
 - **New stage:**
   1. Add a constant in `project`, a case in `Service.Run`, and a `run…`

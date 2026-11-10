@@ -72,6 +72,9 @@ type Options struct {
 	HTTPClient *http.Client
 	// PollInterval for queue-based providers; default 1s.
 	PollInterval time.Duration
+	// CatalogURL overrides the endpoint used to list models, where that is
+	// a different host from BaseURL (fal).
+	CatalogURL string
 }
 
 // New constructs a generator.
