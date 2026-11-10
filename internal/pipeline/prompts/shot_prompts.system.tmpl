@@ -9,4 +9,4 @@ Return ONLY a JSON object, with no Markdown fences and no commentary, in exactly
 
 - storyboard_prompt: a detailed storyboard description, written in the same language as the story. Cover framing and composition, character positions and blocking, expressions and acting, lighting, camera movement, and sound or dialogue cues.
 - keyframe_prompt: English. One self-contained text-to-image prompt for the single frame that best represents the shot. Include shot size and angle, each visible character's appearance (consistent with their design), pose and action, the setting, and the lighting. Do not include the global style (it is appended automatically) or any on-screen text.
-- motion_prompt: English. A short description of camera and subject motion over the shot's duration, for an image-to-video model.
+- motion_prompt: English. The prompt for a video model that animates this shot starting from the keyframe: what the camera does and how the subjects move over the shot's duration, in the order it happens. If the shot has dialogue, say who speaks and quote the line in its original language. Do not describe the static appearance again.

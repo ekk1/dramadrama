@@ -38,7 +38,7 @@ const (
 	KindReference Kind = "reference" // user-supplied style/character references
 	KindConcept   Kind = "concept"   // stage 3: characters, scenes, props
 	KindKeyframe  Kind = "keyframe"  // stage 6: per-shot keyframes
-	KindVideo     Kind = "video"     // reserved for image-to-video
+	KindVideo     Kind = "video"     // stage 7: per-shot video clips
 )
 
 // Kinds lists all kinds in display order.
@@ -73,7 +73,21 @@ type Asset struct {
 }
 
 // IsImage reports whether the asset is an image.
-func (a *Asset) IsImage() bool { return strings.HasPrefix(a.MIME, "image/") }
+func (a *Asset) IsImage() bool { return a.Media() == "image" }
+
+// Media returns the broad type of the asset's content: "image", "video",
+// "audio", or "" for anything else.
+func (a *Asset) Media() string {
+	major, _, _ := strings.Cut(a.MIME, "/")
+	switch major {
+	case "image", "video", "audio":
+		return major
+	}
+	if a.MIME == "application/ogg" {
+		return "audio"
+	}
+	return ""
+}
 
 // Store is a concurrency-safe asset library backed by the filesystem.
 type Store struct {
@@ -202,6 +216,7 @@ type Filter struct {
 	Kind      Kind
 	Tag       string
 	Query     string // substring of name, prompt or tags
+	Media     string // "image", "video" or "audio"
 	IDs       []string
 }
 
@@ -219,6 +234,9 @@ func (s *Store) List(f Filter) []*Asset {
 			continue
 		}
 		if f.Tag != "" && !slices.Contains(a.Tags, f.Tag) {
+			continue
+		}
+		if f.Media != "" && a.Media() != f.Media {
 			continue
 		}
 		if len(f.IDs) > 0 && !slices.Contains(f.IDs, a.ID) {
@@ -329,6 +347,18 @@ func extFor(mt string) string {
 		return ".mp4"
 	case "video/webm":
 		return ".webm"
+	case "video/quicktime":
+		return ".mov"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return ".wav"
+	case "audio/mp4", "audio/x-m4a":
+		return ".m4a"
+	case "audio/ogg", "application/ogg":
+		return ".ogg"
+	case "audio/flac":
+		return ".flac"
 	}
 	if exts, _ := mime.ExtensionsByType(mt); len(exts) > 0 {
 		return exts[0]

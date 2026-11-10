@@ -410,6 +410,7 @@
       if (scope.value === "project" && projectID) params.set("project", projectID);
       if (kind.value) params.set("kind", kind.value);
       if (q.value.trim()) params.set("q", q.value.trim());
+      if (ctx && ctx.media) params.set("media", ctx.media);
       grid.textContent = T("Loading…");
       try {
         const resp = await fetch("/api/assets?" + params);
@@ -420,9 +421,17 @@
           const b = document.createElement("button");
           b.type = "button";
           b.title = [it.name, it.kind, it.project].filter(Boolean).join(" · ");
-          const media = document.createElement(it.mime.startsWith("video/") ? "video" : "img");
-          media.src = it.url;
-          if (media.tagName === "IMG") { media.loading = "lazy"; media.alt = it.name; }
+          let media;
+          if (it.mime.startsWith("audio/") || it.mime === "application/ogg") {
+            media = document.createElement("div");
+            media.className = "audio-pick";
+            media.textContent = "♪";
+          } else {
+            media = document.createElement(it.mime.startsWith("video/") ? "video" : "img");
+            media.src = it.url;
+            if (media.tagName === "IMG") { media.loading = "lazy"; media.alt = it.name; }
+            else { media.muted = true; media.preload = "metadata"; }
+          }
           const cap = document.createElement("span");
           cap.textContent = (it.name || it.id) + " · " + it.kind;
           b.append(media, cap);
@@ -452,7 +461,7 @@
     document.addEventListener("click", (ev) => {
       const btn = ev.target.closest("[data-pick]");
       if (!btn) return;
-      ctx = { action: btn.dataset.action, target: btn.dataset.target, back: btn.dataset.back };
+      ctx = { action: btn.dataset.action, target: btn.dataset.target, back: btn.dataset.back, media: btn.dataset.media || "" };
       scope.value = projectID ? "project" : "";
       picker.showModal();
       load();

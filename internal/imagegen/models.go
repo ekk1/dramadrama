@@ -2,6 +2,7 @@ package imagegen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -105,4 +106,44 @@ func (f *fal) listModels(ctx context.Context, catalogURL string) ([]ModelInfo, e
 		return strings.Compare(a.ID, b.ID)
 	})
 	return list, nil
+}
+
+// ModelSchema fetches the inputs a model declares, so a video request can
+// be mapped onto its fields.
+func ModelSchema(ctx context.Context, o Options, model string) (*InputSchema, error) {
+	switch o.Type {
+	case TypeFal:
+		return newFal(o).modelSchema(ctx, o.CatalogURL, model)
+	}
+	return nil, fmt.Errorf("imagegen: provider type %q cannot describe models", o.Type)
+}
+
+// modelSchema calls GET {catalog}/models?endpoint_id=…&expand=openapi-3.0
+// and parses the returned OpenAPI document.
+func (f *fal) modelSchema(ctx context.Context, catalogURL, model string) (*InputSchema, error) {
+	base := strings.TrimRight(strings.TrimSpace(catalogURL), "/")
+	if base == "" {
+		base = falCatalogURL
+	}
+	q := url.Values{"endpoint_id": {model}, "expand": {"openapi-3.0"}}
+	var out struct {
+		Models []map[string]json.RawMessage `json:"models"`
+	}
+	if err := f.do(ctx, http.MethodGet, base+"/models?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	for _, m := range out.Models {
+		var id string
+		json.Unmarshal(m["endpoint_id"], &id)
+		if id != model {
+			continue
+		}
+		for _, key := range []string{"openapi", "openapi-3.0", "openapi_3_0"} {
+			if doc, ok := m[key]; ok {
+				return ParseOpenAPI(model, doc)
+			}
+		}
+		return nil, fmt.Errorf("fal: no OpenAPI document for %s", model)
+	}
+	return nil, fmt.Errorf("fal: model %s not found", model)
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ekk1/dramadrama/internal/config"
+	"github.com/ekk1/dramadrama/internal/imagegen"
 )
 
 func TestStore(t *testing.T) {
@@ -36,12 +37,23 @@ func TestStore(t *testing.T) {
 	if l == nil || len(l.Models) != 1 || l.Models[0].ID != "m1" || l.FetchedAt.IsZero() {
 		t.Fatalf("get: %+v", l)
 	}
+	// Schemas are cached per model and follow the provider.
+	sc := &imagegen.InputSchema{Model: "acme/video/v1", Params: []imagegen.Param{{Name: "prompt", Type: "string"}}}
+	if err := s.SaveSchema(name, sc); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Schema(name, "acme/video/v1"); got == nil || got.Params[0].Name != "prompt" {
+		t.Fatalf("schema: %+v", got)
+	}
+	if s.Schema(name, "other") != nil {
+		t.Fatal("unexpected schema")
+	}
 	s.Rename(name, "fal")
-	if s.Get(name) != nil || s.Get("fal") == nil {
+	if s.Get(name) != nil || s.Get("fal") == nil || s.Schema("fal", "acme/video/v1") == nil || s.Schema(name, "acme/video/v1") != nil {
 		t.Fatal("rename")
 	}
 	s.Delete("fal")
-	if s.Get("fal") != nil {
+	if s.Get("fal") != nil || s.Schema("fal", "acme/video/v1") != nil {
 		t.Fatal("delete")
 	}
 	var none *Store

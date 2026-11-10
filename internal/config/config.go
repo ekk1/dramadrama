@@ -32,6 +32,7 @@ type Config struct {
 	Providers []Provider            `json:"providers"`
 	Stages    map[string]StageModel `json:"stages"`
 	Image     ImageConfig           `json:"image"`
+	Video     VideoConfig           `json:"video"`
 }
 
 // Provider is one API endpoint.
@@ -92,6 +93,22 @@ type ImageConfig struct {
 	Extra       map[string]any `json:"extra,omitempty"`
 }
 
+// VideoConfig selects the video backend.
+type VideoConfig struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Mapping overrides which model field carries each input role
+	// (imagegen.Roles), for the default model only. Normally empty: the
+	// roles are detected from the model's published input schema.
+	Mapping map[string]string `json:"mapping,omitempty"`
+	// Extra is merged into every request, e.g. {"resolution": "1080p"}.
+	Extra map[string]any `json:"extra,omitempty"`
+}
+
+// DefaultVideoModel takes a first frame, a last frame, and reference
+// images, videos and audio.
+const DefaultVideoModel = "minimax/h3-max/reference-to-video"
+
 // Default returns the configuration written on first start.
 func Default() *Config {
 	return &Config{
@@ -114,6 +131,7 @@ func Default() *Config {
 			RefModel:    "fal-ai/flux-pro/kontext",
 			AspectRatio: "9:16",
 		},
+		Video: VideoConfig{Provider: "fal", Model: DefaultVideoModel},
 	}
 }
 
@@ -160,6 +178,17 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("image: %q is not an image provider", c.Image.Provider)
 		}
 	}
+	if c.Video.Provider != "" {
+		p := c.Provider(c.Video.Provider)
+		if p == nil || !p.IsImage() {
+			return fmt.Errorf("video: %q is not a media provider", c.Video.Provider)
+		}
+	}
+	for role := range c.Video.Mapping {
+		if !slices.Contains(imagegen.Roles, role) {
+			return fmt.Errorf("video: unknown input role %q (use one of %s)", role, strings.Join(imagegen.Roles, ", "))
+		}
+	}
 	return nil
 }
 
@@ -200,6 +229,10 @@ func Load(path string) (*Manager, error) {
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
+	// Config files written before video existed: use the image provider.
+	if c.Video.Provider == "" && c.Video.Model == "" && c.Image.Provider != "" {
+		c.Video = VideoConfig{Provider: c.Image.Provider, Model: DefaultVideoModel}
 	}
 	m.cfg = &c
 	return m, nil

@@ -141,7 +141,14 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	v.Request = logFields(e.Request, "Parameters",
 		[2]string{"system", "System prompt"}, [2]string{"user", "User prompt"}, [2]string{"prompt", "Prompt"})
 	v.Response = logFields(e.Response, "Details", [2]string{"text", "Output"})
-	v.Inputs = append(stringList(e.Request["images"]), stringList(e.Request["references"])...)
+	for _, k := range []string{"first_frame", "last_frame"} {
+		if id, ok := e.Request[k].(string); ok {
+			v.Inputs = append(v.Inputs, id)
+		}
+	}
+	for _, k := range []string{"images", "references", "reference_videos", "reference_audios"} {
+		v.Inputs = append(v.Inputs, stringList(e.Request[k])...)
+	}
 	v.Outputs = stringList(e.Response["assets"])
 	s.render(w, r, "log", view{Title: "Request log", Nav: "logs", D: v})
 }
@@ -193,6 +200,7 @@ var stageNames = map[string]string{
 	project.StageStoryboard:    "Storyboard overview",
 	project.StageShotPrompts:   "Shot-level prompts",
 	project.StageKeyframes:     "Keyframes",
+	project.StageClips:         "Video clips",
 }
 
 func logKind(k string) string {

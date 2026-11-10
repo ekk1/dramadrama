@@ -2,8 +2,8 @@
 
 A workbench for producing short dramas through a simple, linear pipeline.
 Every step is triggered by a person, every output can be edited before the
-next step reads it, and every generated image lands in one shared asset
-library.
+next step reads it, and every generated image and video clip lands in one shared
+asset library.
 
 Written in Go using only the standard library (no third-party modules).
 
@@ -16,14 +16,17 @@ Written in Go using only the standard library (no third-party modules).
 | 3a | Visual prompts | LLM (can see the reference images) | global style + characters / scenes / props with English image prompts |
 | 3b | Concept images | fal.ai | one or more images per visual item |
 | 4 | Storyboard overview | LLM | shot list: scene, characters, action, dialogue, camera, duration |
-| 5 | Shot-level prompts | LLM, per shot or all | storyboard description, keyframe prompt, motion prompt (for future image-to-video) |
+| 5 | Shot-level prompts | LLM, per shot or all | storyboard description, keyframe prompt, motion prompt (the video prompt) |
 | 6 | Keyframes | fal.ai, per shot or all | keyframe images, conditioned on the matching concept images |
+| 7 | Video clips | fal.ai, per shot or all | one clip per shot, opening on its keyframe |
 
 Notes:
 
 - Re-running a step replaces its output in the project. Generated images stay in the library.
 - If an LLM returns JSON that can't be parsed, the raw text is kept so you can fix it by hand and apply it.
 - In step 6, each shot automatically uses the concept image currently in use for each character, scene, or prop it mentions. Attaching references to a shot explicitly overrides this.
+- In step 7, a clip's first frame is the shot's keyframe in use. Each shot can also have a last frame (any image, or one click for the next shot's keyframe), reference videos and reference audio. The same reference images as in step 6 are sent too.
+- Image and video requests go through fal's queue and are polled automatically. The request ID is saved in the project while a request is in flight, so if a run is stopped or the server restarts, running the step again collects the finished result instead of generating (and paying) again. If the prompt or inputs changed meanwhile, the old request is cancelled and a new one is sent.
 
 ## Running
 
@@ -61,9 +64,9 @@ On first start, a config file is created with these providers:
 
 Export the variables you need, or store keys on the **Settings** page.
 
-Settings has three tabs: **Providers** (one card per provider; click to edit,
+Settings has four tabs: **Providers** (one card per provider; click to edit,
 fetch its model list, or delete), **Language models** (default provider and
-model per step) and **Image generation**. Every model field has a "Browse"
+model per step), **Image generation** and **Video generation**. Every model field has a "Browse"
 button that opens the provider's model list with search; for fal the list can
 be filtered by category (text-to-image, image-to-image, image-to-video, …).
 Typing a model ID by hand still works.
@@ -83,6 +86,7 @@ data/
   prompts/<name>.tmpl         prompt template overrides (edit on the Prompts page)
   models/<provider>.json      model list fetched from each provider (Settings → provider
                               → "Fetch model list", or from any model picker)
+  models/<provider>.schemas/  input lists of the video models that have been used
   logs/<day>/<time>_….json    request log: one file per LLM call or media generation,
                               with the full prompt and output (view on the Logs page)
 ```
@@ -111,14 +115,23 @@ web/               templates, CSS and JS (embedded into the binary)
 
 Providers then become selectable in Settings.
 
-### Video
+### Video models
 
-Shots already carry a `motion_prompt` and a reserved `clip_id`, and the asset
-library has a `video` kind. An image-to-video step would:
+Video models name their inputs differently (`image_url`, `first_frame_image_url`,
+`tail_image_url`, a duration that is a number or a string enum, …). The clip
+request describes its inputs by role: prompt, first frame, last frame,
+reference images, reference videos, reference audio, duration, aspect ratio.
+The roles are matched to the model's fields using the input list fal publishes
+for each model, which is fetched on first use and cached under `data/models/`.
 
-1. Read each shot's keyframe that is in use, plus its motion prompt.
-2. Call a video backend through a new interface next to `imagegen`.
-3. Store the clip as a `video` asset.
+**Settings → Video generation** shows how the chosen model's inputs are matched,
+lists its other inputs (set them through "Extra parameters"), and takes an
+optional override when the automatic match is wrong. Inputs the model lacks are
+skipped, and the run log says so. The duration is rounded to the nearest value
+the model accepts.
+
+Files are sent to fal inline as data URIs. That is fine for frames and short
+clips; large reference videos make the request heavy.
 
 ## Tests
 

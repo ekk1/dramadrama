@@ -63,6 +63,7 @@ func run(addr, dataDir, cfgPath, devDir string) error {
 	}
 	pipe := pipeline.New(cfg, projects, lib, prompts)
 	pipe.Log = logs
+	pipe.Models = models
 
 	h, err := server.New(server.Options{
 		Config: cfg, Projects: projects, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, Models: models, DevDir: devDir,

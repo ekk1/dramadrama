@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// Image is an input or output image. Inputs need Data+MIME (or a public
-// URL); outputs always have Data downloaded.
+// Image is an input or output media file: an image, or for video requests
+// a video or audio clip. Inputs need Data+MIME (or a public URL); outputs
+// always have Data downloaded.
 type Image struct {
 	MIME   string
 	Data   []byte
@@ -21,8 +22,16 @@ type Image struct {
 	Height int
 }
 
-// Request is one image generation call.
+// Request kinds.
+const (
+	KindImage = "image"
+	KindVideo = "video"
+)
+
+// Request is one generation call.
 type Request struct {
+	// Kind is KindImage (the default) or KindVideo.
+	Kind           string
 	Model          string
 	Prompt         string
 	NegativePrompt string
@@ -35,19 +44,59 @@ type Request struct {
 	// Extra is merged into the provider payload last, so it can override
 	// anything.
 	Extra map[string]any
+
+	// Video inputs. Which payload field carries each of them depends on
+	// the model: see ResolveRoles.
+	FirstFrame *Image
+	LastFrame  *Image
+	RefVideos  []Image
+	RefAudios  []Image
+	Duration   float64 // seconds; 0 leaves the model's default
+	// Schema is the model's declared inputs, if known.
+	Schema *InputSchema
+	// Mapping overrides the detected role → field assignment.
+	Mapping map[string]string
 }
 
 // Result of a generation call.
 type Result struct {
 	Images    []Image
+	Videos    []Image
 	Seed      *int64
 	RequestID string
 	Raw       json.RawMessage
 }
 
-// Generator is implemented by every image backend.
+// Generator is implemented by every backend.
 type Generator interface {
 	Generate(ctx context.Context, req *Request) (*Result, error)
+}
+
+// Job identifies a request that a queue-based provider has accepted. It is
+// all that is needed to collect the result later, even from another
+// process, so callers persist it while the request is in flight.
+type Job struct {
+	RequestID   string `json:"request_id"`
+	StatusURL   string `json:"status_url"`
+	ResponseURL string `json:"response_url"`
+}
+
+// Queued is implemented by generators whose requests can be submitted and
+// collected separately. Generate is Submit followed by Wait.
+type Queued interface {
+	Submit(ctx context.Context, req *Request) (*Job, error)
+	// Wait polls until the job finishes and downloads its outputs.
+	// onStatus, if not nil, is called whenever the reported state changes.
+	Wait(ctx context.Context, job *Job, onStatus func(string)) (*Result, error)
+	// Cancel asks the provider to drop a job. Best effort.
+	Cancel(ctx context.Context, job *Job) error
+}
+
+// Explainer is implemented by generators that can say, in plain English,
+// how a video request's inputs map onto the model's fields and which ones
+// the model cannot take.
+type Explainer interface {
+	Explain(req *Request) []string
 }
 
 // PayloadDescriber is implemented by generators that can show the request

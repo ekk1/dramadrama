@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -300,6 +302,10 @@ func (s *Server) handleApplyRaw(w http.ResponseWriter, r *http.Request) {
 //	visual-out:<id>    generated images of a visual item
 //	shot:<id>          explicit reference images of a shot
 //	keyframe:<id>      keyframes of a shot
+//	endframe:<id>      last-frame images of a shot's clip
+//	vref:<id>          reference videos of a shot's clip
+//	aref:<id>          reference audio of a shot's clip
+//	clip:<id>          video clips of a shot
 func refList(p *project.Project, target string) (*[]string, error) {
 	kind, id, _ := strings.Cut(target, ":")
 	switch kind {
@@ -314,24 +320,56 @@ func refList(p *project.Project, target string) (*[]string, error) {
 			return &v.ReferenceIDs, nil
 		}
 		return &v.AssetIDs, nil
-	case "shot", "keyframe":
+	case "shot", "keyframe", "endframe", "vref", "aref", "clip":
 		sh := p.Shot(id)
 		if sh == nil {
 			return nil, errors.New("shot not found")
 		}
-		if kind == "shot" {
+		switch kind {
+		case "shot":
 			return &sh.ReferenceIDs, nil
+		case "keyframe":
+			return &sh.KeyframeIDs, nil
+		case "endframe":
+			return &sh.EndFrameIDs, nil
+		case "vref":
+			return &sh.VideoRefIDs, nil
+		case "aref":
+			return &sh.AudioRefIDs, nil
 		}
-		return &sh.KeyframeIDs, nil
+		return &sh.ClipIDs, nil
 	}
 	return nil, fmt.Errorf("unknown target %q", target)
+}
+
+// targetMedia returns the media type a reference list holds.
+func targetMedia(target string) string {
+	switch kind, _, _ := strings.Cut(target, ":"); kind {
+	case "vref", "clip":
+		return "video"
+	case "aref":
+		return "audio"
+	}
+	return "image"
+}
+
+// checkMedia rejects an asset of the wrong media type for a list.
+func checkMedia(a *assets.Asset, target string) error {
+	if want := targetMedia(target); a.Media() != want {
+		return fmt.Errorf("this list takes %s files", want)
+	}
+	return nil
 }
 
 // handleRefs adds, removes or promotes (op=primary: move to the end, which
 // marks it as the one used downstream) an asset in a reference list.
 func (s *Server) handleRefs(w http.ResponseWriter, r *http.Request) {
 	aid := r.FormValue("asset_id")
-	if _, err := s.assets.Get(aid); err != nil {
+	a, err := s.assets.Get(aid)
+	if err == nil && r.FormValue("op") == "add" {
+		err = checkMedia(a, r.FormValue("target"))
+	}
+	if err != nil {
 		done(w, r, projectURL(r.PathValue("id")), err)
 		return
 	}
@@ -354,7 +392,7 @@ func (s *Server) handleRefs(w http.ResponseWriter, r *http.Request) {
 }
 
 // saveUploads stores multipart files as assets.
-func (s *Server) saveUploads(w http.ResponseWriter, r *http.Request, meta func() assets.Asset) ([]*assets.Asset, error) {
+func (s *Server) saveUploads(w http.ResponseWriter, r *http.Request, meta func() (assets.Asset, string)) ([]*assets.Asset, error) {
 	// Cap the whole request body, and keep at most 8 MB of it in memory
 	// (larger files are spooled to temporary files by the parser). This
 	// must happen before anything reads a form value.
@@ -367,10 +405,10 @@ func (s *Server) saveUploads(w http.ResponseWriter, r *http.Request, meta func()
 		return nil, err
 	}
 	defer r.MultipartForm.RemoveAll()
-	m := meta()
+	m, want := meta()
 	var out []*assets.Asset
 	for _, fh := range r.MultipartForm.File["files"] {
-		a, err := s.saveUpload(fh, m)
+		a, err := s.saveUpload(fh, m, want)
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", fh.Filename, err)
 		}
@@ -382,7 +420,9 @@ func (s *Server) saveUploads(w http.ResponseWriter, r *http.Request, meta func()
 	return out, nil
 }
 
-func (s *Server) saveUpload(fh *multipart.FileHeader, meta assets.Asset) (*assets.Asset, error) {
+// saveUpload stores one uploaded file. want, if set, is the media type
+// ("image", "video", "audio") the file must have.
+func (s *Server) saveUpload(fh *multipart.FileHeader, meta assets.Asset, want string) (*assets.Asset, error) {
 	f, err := fh.Open()
 	if err != nil {
 		return nil, err
@@ -392,11 +432,20 @@ func (s *Server) saveUpload(fh *multipart.FileHeader, meta assets.Asset) (*asset
 	if err != nil {
 		return nil, err
 	}
+	// Sniff the content. Audio is often not recognised (and an .m4a looks
+	// like video/mp4), so there the file name decides.
 	mt := http.DetectContentType(data)
-	if !strings.HasPrefix(mt, "image/") && !strings.HasPrefix(mt, "video/") {
-		return nil, fmt.Errorf("unsupported file type %s", mt)
+	if ext := mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename))); strings.HasPrefix(ext, "audio/") &&
+		(mt == "application/octet-stream" || mt == "video/mp4" || strings.HasPrefix(mt, "text/")) {
+		mt, _, _ = strings.Cut(ext, ";")
 	}
 	meta.MIME = mt
+	if meta.Media() == "" {
+		return nil, fmt.Errorf("unsupported file type %s", mt)
+	}
+	if want != "" && meta.Media() != want {
+		return nil, fmt.Errorf("this list takes %s files", want)
+	}
 	if meta.Name == "" {
 		meta.Name = fh.Filename
 	}
@@ -408,8 +457,13 @@ func (s *Server) handleProjectUpload(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.projects.Get(id); notFound(w, err) {
 		return
 	}
-	uploaded, err := s.saveUploads(w, r, func() assets.Asset {
-		return assets.Asset{Kind: assets.KindReference, ProjectID: id, Stage: project.StageInput, Tags: []string{"upload"}}
+	uploaded, err := s.saveUploads(w, r, func() (assets.Asset, string) {
+		target := r.FormValue("target")
+		meta := assets.Asset{Kind: assets.KindReference, ProjectID: id, Stage: project.StageInput, Tags: []string{"upload"}}
+		if strings.HasPrefix(target, "clip:") {
+			meta.Kind, meta.Stage = assets.KindVideo, project.StageClips
+		}
+		return meta, targetMedia(target)
 	})
 	if len(uploaded) > 0 {
 		target := r.FormValue("target")
@@ -510,6 +564,14 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	send("done", "ok")
 }
 
+// handleDiscardJob forgets an unfinished provider job, so the next run
+// submits a new request instead of collecting that one.
+func (s *Server) handleDiscardJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.pipe.DiscardJob(r.Context(), id, r.FormValue("key"))
+	done(w, r, projectURL(id), nil)
+}
+
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.pipe.Cancel(id, r.FormValue("key")) {
@@ -536,6 +598,7 @@ func (s *Server) filter(r *http.Request) assets.Filter {
 		Kind:      assets.Kind(q.Get("kind")),
 		Tag:       q.Get("tag"),
 		Query:     q.Get("q"),
+		Media:     q.Get("media"),
 	}
 }
 
@@ -557,12 +620,12 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLibraryUpload(w http.ResponseWriter, r *http.Request) {
-	_, err := s.saveUploads(w, r, func() assets.Asset {
+	_, err := s.saveUploads(w, r, func() (assets.Asset, string) {
 		kind := assets.Kind(r.FormValue("kind"))
 		if !slices.Contains(assets.Kinds, kind) {
 			kind = assets.KindReference
 		}
-		return assets.Asset{Kind: kind, ProjectID: r.FormValue("project"), Tags: assets.ParseTags(r.FormValue("tags"))}
+		return assets.Asset{Kind: kind, ProjectID: r.FormValue("project"), Tags: assets.ParseTags(r.FormValue("tags"))}, ""
 	})
 	done(w, r, "/assets", err)
 }

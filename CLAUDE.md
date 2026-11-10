@@ -14,9 +14,11 @@ human-triggered pipeline (no node graphs, nothing runs automatically):
 4. Storyboard overview (LLM)
 5. Shot-level prompts (LLM)
 6. Keyframes (fal.ai)
+7. Video clips (fal.ai): per shot, from the keyframe (first frame), an
+   optional last frame, reference images/videos/audio and the motion prompt
 
-**Status:** the full pipeline, the asset library, the web UI (zh/en), a
-request log and per-provider model lists exist. Nothing has been run
+**Status:** the full pipeline including video, the asset library, the web
+UI (zh/en), a request log and per-provider model lists exist. Nothing has been run
 against real provider APIs yet; all tests use fakes.
 
 ## Working agreements with the owner
@@ -68,7 +70,9 @@ assets, prompt overrides, cached model lists, and the request log. Keys come fro
 cmd/dramadrama     wiring + flags
 internal/llm       Client{Chat, Stream(iter.Seq2[Chunk,error])}; openai_chat,
                    openai_responses, anthropic, gemini; shared SSE reader (http.go)
-internal/imagegen  Generator interface; fal.go (queue API: submit → poll → fetch)
+internal/imagegen  media generation (images and video, despite the name): Generator
+                   and Queued (Submit/Wait/Cancel) interfaces; fal.go (queue API);
+                   schema.go (model input lists, role → field matching)
 internal/assets    central asset library: index.json + files/<sha256><ext>
 internal/project   Project model + JSON store; Store.Update(id, fn) is the
                    only safe way to mutate (holds a lock across load/fn/save)
@@ -78,7 +82,8 @@ internal/catalog   model lists fetched from providers, cached one file per
 internal/reqlog    request log: one JSON file per model request under
                    data/logs/<day>/; no index, the directory tree is the database
 internal/pipeline  stage implementations, Service.Run dispatch, prompt templates
-                   (prompts/*.tmpl, overridable from data/prompts), JSON parsing
+                   (prompts/*.tmpl, overridable from data/prompts), JSON parsing;
+                   media.go: resumable provider jobs and the clips stage
 internal/server    handlers, i18n, SSE run endpoint, settings, prompt editor,
                    request log pages
 web/               embedded templates (layout, partials, pages) + static/app.{css,js}
@@ -92,9 +97,15 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   - Re-running a stage replaces project data but never deletes assets.
   - Deleting an asset must also call `Project.RemoveAssetRefs` on every
     project.
-- **The "in use" image is the last element of a list** (`AssetIDs`,
-  `KeyframeIDs`). The UI's "use" action moves an image to the end, and step
-  6 auto-references the last concept image of each matching visual.
+- **The "in use" item is the last element of a list** (`AssetIDs`,
+  `KeyframeIDs`, `EndFrameIDs`, `ClipIDs`). The UI's "use" action moves an
+  item to the end, and step 6 auto-references the last concept image of
+  each matching visual. `VideoRefIDs` and `AudioRefIDs` have no "in use"
+  item: all of them are sent.
+- **Reference lists are typed by media.** `refList` maps a target such as
+  `keyframe:<shot>` or `vref:<shot>` to its list and `targetMedia` says
+  whether it holds images, video or audio; adding and uploading check it.
+  A new list needs both, plus `Project.RemoveAssetRefs`.
 - **Stage runs:**
   - Each run goes through `pipeline.Service.Run`, which:
     - takes a per-(project, stage:target) busy lock and makes the run
@@ -104,9 +115,21 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     SSE events.
   - Runs are detached from the HTTP request (`context.WithoutCancel`), so
     closing the page doesn't stop them; the page has a stop button instead.
+- **Media jobs are resumable** (`Service.runJob`, used for images and
+  video):
+  - The provider's job handle is saved in `Project.Jobs[stage:item]` as
+    soon as the request is accepted and removed when the result is
+    collected or the provider gives a final error.
+  - `imagegen.Retryable` decides what is not final: cancellation,
+    network errors, 5xx and 429. Those keep the job.
+  - A later run for the same item collects the saved job if its
+    fingerprint (model + redacted payload) is unchanged; otherwise it
+    cancels that job and submits a new one. Nothing resumes on its own.
+  - The page shows a note with a "discard" action for a saved job.
 - **Request log:**
   - Every model request is logged through `Service.writeLog`: LLM calls
-    in `complete`, media generation in `generateImage`. A new kind of
+    in `complete`, media generation in `generateImage` and
+    `generateClip`. A new kind of
     request must be logged the same way, with a `callInfo` saying which
     project, stage and item it is for.
   - Entries hold the full prompt and output. They must never contain API
@@ -142,8 +165,8 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   - Add every new key to the `zh` map in `internal/server/i18n.go`.
   - Messages that embed values need a regex in `zhPatterns`.
   - JS strings go in `jsKeys` and are read in JS with `T("…")`.
-  - New fixed `errors.New` messages in `pipeline.go` also need a `zh`
-    entry.
+  - New fixed `errors.New` messages in `pipeline.go` and `media.go` also
+    need a `zh` entry.
   - `TestTemplateKeysTranslated` and `TestPipelineErrorsTranslated`
     enforce all of this.
 - **Security:**
@@ -185,10 +208,21 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     (server.go); update it when adding a stage.
   - Uploads must go through `saveUploads`, which caps the request body
     before any form value is read.
-- **Video readiness:** shots already have `MotionPrompt` and `ClipID`, and
-  the asset library has `KindVideo`. Image-to-video should be a new
-  interface next to `imagegen`, plus a new stage `clips` after
-  `keyframes`.
+- **Video requests are described by role, not by field name.**
+  - `imagegen.Request` carries `FirstFrame`, `LastFrame`, `References`,
+    `RefVideos`, `RefAudios` and `Duration`. `ResolveRoles` matches them
+    to the model's fields from its `InputSchema`, which is parsed from the
+    OpenAPI document fal publishes per model and cached by
+    `catalog.Store` on first use.
+  - Without a schema only `prompt` and `image_url` are assumed.
+    `VideoConfig.Mapping` overrides the match, for the default model only.
+  - An input the model cannot take is never dropped silently: the
+    generator's `Explain` notes are emitted as status lines.
+  - The owner cares most about first/last frame plus reference video and
+    audio, with `minimax/h3-max/reference-to-video` (the default model)
+    as the reference case. Its real field names have not been verified:
+    the fal hosts were unreachable from the sessions that wrote this.
+  - Files go to fal inline as data URIs.
 
 ## Adding things
 
@@ -225,9 +259,17 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   anything that shows up.
 - There is no CI. A GitHub Actions workflow running vet and race tests on
   PRs would help.
+- Verify against the live fal API: the model list, the per-model OpenAPI
+  document (`expand=openapi-3.0`, read from an `openapi` key), the queue
+  cancel URL, and the role matching for the default video model.
+- Large reference videos are sent inline; fal's storage upload would be
+  better but its API was not verified.
+- There is no step that joins the clips into one video (ffmpeg would be
+  an external dependency; ask first).
+- Last frames are picked by hand or taken from the next shot's keyframe;
+  there is no prompt or generation step for a dedicated end frame.
 - `fal-ai/flux-pro/kontext` takes a single image, so with several
   references only the first is used. Consider a multi-reference default.
-- Image-to-video stage (see Video readiness above).
 - There is no auth. It's needed before exposing the server beyond
   localhost.
 - The `Host` header is not validated, so a DNS-rebinding page could drive

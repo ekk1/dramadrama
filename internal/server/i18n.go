@@ -66,6 +66,12 @@ func pat(expr string, fn func(m []string, tr func(string) string) string) patter
 	return pattern{regexp.MustCompile(expr), fn}
 }
 
+// zhRoles names the inputs of a video request.
+var zhRoles = map[string]string{
+	"first frame": "首帧", "last frame": "尾帧", "reference images": "参考图",
+	"reference videos": "参考视频", "reference audio": "参考音频",
+}
+
 // zhPatterns translates messages that embed values.
 var zhPatterns = []pattern{
 	pat(`^Calling (.+) / (.+)…$`, func(m []string, _ func(string) string) string {
@@ -76,6 +82,50 @@ var zhPatterns = []pattern{
 	}),
 	pat(`^Fetched (\d+) models from (.+)$`, func(m []string, _ func(string) string) string {
 		return "已从 " + m[2] + " 拉取 " + m[1] + " 个模型"
+	}),
+	pat(`^Collecting the result of request (\S+), submitted earlier, instead of generating again…$`, func(m []string, _ func(string) string) string {
+		return "正在取回之前提交的请求 " + m[1] + " 的结果，不会重新生成…"
+	}),
+	pat(`^Provider status: IN_QUEUE \(position (\d+)\)$`, func(m []string, _ func(string) string) string {
+		return "服务商状态：排队中（第 " + m[1] + " 位）"
+	}),
+	pat(`^Provider status: IN_QUEUE$`, func(_ []string, _ func(string) string) string { return "服务商状态：排队中" }),
+	pat(`^Provider status: IN_PROGRESS$`, func(_ []string, _ func(string) string) string { return "服务商状态：生成中" }),
+	pat(`^Provider status: (.+)$`, func(m []string, _ func(string) string) string { return "服务商状态：" + m[1] }),
+	pat(`^Fetching the parameter list of (.+)…$`, func(m []string, _ func(string) string) string {
+		return "正在拉取 " + m[1] + " 的参数列表…"
+	}),
+	pat(`^Could not fetch the model's parameter list: (.*)$`, func(m []string, _ func(string) string) string {
+		return "无法拉取模型的参数列表：" + m[1]
+	}),
+	pat(`^Generating video with (.+) / (.+)…$`, func(m []string, _ func(string) string) string {
+		return "正在使用 " + m[1] + " / " + m[2] + " 生成视频…"
+	}),
+	pat(`^(first frame|last frame|reference images|reference videos|reference audio) → (\S+)( \(only the first of (\d+)\))?$`, func(m []string, _ func(string) string) string {
+		out := zhRoles[m[1]] + " → " + m[2]
+		if m[4] != "" {
+			out += "（共 " + m[4] + " 个，只发送第一个）"
+		}
+		return out
+	}),
+	pat(`^(first frame|last frame|reference images|reference videos|reference audio): not supported by this model, ignored$`, func(m []string, _ func(string) string) string {
+		return zhRoles[m[1]] + "：该模型不支持，已忽略"
+	}),
+	pat(`^duration → (\S+) = (.+)$`, func(m []string, _ func(string) string) string { return "时长 → " + m[1] + " = " + m[2] }),
+	pat(`^aspect ratio: (\S+) is not offered by this model, its default is used$`, func(m []string, _ func(string) string) string {
+		return "画幅比例：该模型不提供 " + m[1] + "，使用其默认值"
+	}),
+	pat(`^The reference files total (\d+) MB and are sent inline; a request this large can be slow or be rejected\.$`, func(m []string, _ func(string) string) string {
+		return "参考文件共 " + m[1] + " MB，以内联方式发送；这么大的请求可能很慢或被拒绝。"
+	}),
+	pat(`^shot (\d+) has no motion prompt yet: run step 5 or write one$`, func(m []string, _ func(string) string) string {
+		return "镜头 " + m[1] + " 还没有运动提示词：请运行第 5 步或手动填写"
+	}),
+	pat(`^"(.+)" is not a configured image or video provider$`, func(m []string, _ func(string) string) string {
+		return "“" + m[1] + "” 不是已配置的图像或视频服务商"
+	}),
+	pat(`^this list takes (image|video|audio) files$`, func(m []string, _ func(string) string) string {
+		return "这个列表只接受" + map[string]string{"image": "图片", "video": "视频", "audio": "音频"}[m[1]] + "文件"
 	}),
 	pat(`^Shot (\d+)$`, func(m []string, _ func(string) string) string { return "镜头 " + m[1] }),
 	pat(`^Could not write the request log: (.*)$`, func(m []string, _ func(string) string) string {
@@ -142,6 +192,53 @@ func jsStrings(tr func(string) string) map[string]string {
 
 // zh is the Simplified Chinese dictionary.
 var zh = map[string]string{
+	"Video clips":        "视频片段",
+	"Generate all clips": "生成全部片段",
+	"Generate clip":      "生成片段",
+	"Clips":              "片段",
+	"Each clip opens on the shot's keyframe in use and follows its motion prompt. A last frame, reference videos and reference audio are sent if the model takes them; the run log says what was used.": "每个片段以该镜头「使用中」的关键帧开场，并按运动提示词生成。如果模型支持，还会发送尾帧、参考视频和参考音频；运行日志会说明实际用了哪些。",
+	"No motion prompt yet: run step 5.": "还没有运动提示词：请运行第 5 步。",
+	"First frame":                       "首帧",
+	"Last frame":                        "尾帧",
+	"Reference videos":                  "参考视频",
+	"Reference audio":                   "参考音频",
+	"Reference images":                  "参考图",
+	"No keyframe: run step 6, or the clip is generated from the prompt and references alone.":          "没有关键帧：请运行第 6 步，否则片段只会根据提示词和参考素材生成。",
+	"None: the model decides how the shot ends.":                                                       "无：由模型决定镜头如何结束。",
+	"End this clip on the first frame of the next shot":                                                "让这个片段结束在下一个镜头的首帧上",
+	"use the next shot's keyframe":                                                                     "使用下一个镜头的关键帧",
+	"same as the keyframe's (step 6)":                                                                  "与关键帧相同（第 6 步）",
+	"Use this one downstream":                                                                          "后续步骤使用这一个",
+	"An earlier request is unfinished. Generating again collects its result instead of starting over.": "上一次请求还没有取回结果。再次生成会直接取回它，不会重新开始。",
+	"Discard the unfinished request? Its result will be lost.":                                         "放弃这个未完成的请求？它的结果将丢失。",
+	"discard": "放弃",
+	"(English, the prompt of the video clip in step 7)": "（英文，第 7 步视频片段的提示词）",
+	"Video generation": "视频生成",
+	"Video model":      "视频模型",
+	"(JSON object merged into every request, e.g. {\"resolution\": \"1080p\"})": "（合并到每次请求的 JSON 对象，例如 {\"resolution\": \"1080p\"}）",
+	"Input mapping override": "输入映射覆盖",
+	"(optional JSON, role → field name, for this model only; \"-\" switches a role off)": "（可选 JSON，角色 → 字段名，仅对该模型生效；填 \"-\" 表示不发送该项）",
+	"How this model's inputs are used": "该模型的输入如何对应",
+	"Detected from the model's published input list. Inputs the model lacks are skipped and reported in the run log.":                                              "根据模型公布的输入列表自动识别。模型不支持的输入会被跳过，并在运行日志中说明。",
+	"The model's input list has not been fetched yet, so only the prompt and the first frame would be sent. It is fetched automatically on the first run, or now:": "还没有拉取该模型的输入列表，此时只会发送提示词和首帧。首次运行时会自动拉取，也可以现在拉取：",
+	"Model field":                "模型字段",
+	"Accepts":                    "可接受的值",
+	"not supported":              "不支持",
+	"Other inputs of this model": "该模型的其他输入",
+	"Set any of these through Extra parameters.": "可以通过「附加参数」设置这些输入。",
+	"Refresh input list":                         "刷新输入列表",
+	"Fetch input list":                           "拉取输入列表",
+	"Media type":                                 "媒体类型",
+	"Any media":                                  "全部媒体",
+	"Audio":                                      "音频",
+	"Input files":                                "输入文件",
+	"no video provider configured; set one in Settings":                                    "还没有配置视频服务商，请在设置中选择",
+	"no video model configured; set one in Settings":                                       "还没有配置视频模型，请在设置中选择",
+	"the model returned no video":                                                          "模型没有返回视频",
+	"This shot has no keyframe: generating without a first frame.":                         "这个镜头没有关键帧：将在没有首帧的情况下生成。",
+	"The request changed since the unfinished one was submitted: cancelling that one.":     "与之前未完成的请求相比内容已改变：正在取消旧请求。",
+	"The request is still with the provider. Run this step again to collect its result.":   "请求仍在服务商处处理。再次运行此步骤即可取回结果。",
+	"The model's parameter list is unknown: only the prompt and the first frame are sent.": "模型的参数列表未知：只发送提示词和首帧。",
 	"Language models":           "语言模型",
 	"Language model providers":  "语言模型服务商",
 	"Image and video providers": "图像与视频服务商",

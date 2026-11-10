@@ -84,11 +84,57 @@ func (s *Store) Save(provider string, models []Model) (*List, error) {
 	return l, assets.WriteFileAtomic(s.path(provider), data)
 }
 
-// Delete removes a provider's cached list.
+// Delete removes a provider's cached list and model schemas.
 func (s *Store) Delete(provider string) {
 	if s != nil && provider != "" {
 		os.Remove(s.path(provider))
+		os.RemoveAll(s.schemaDir(provider))
 	}
+}
+
+// Model input schemas are cached per model, next to the provider's list:
+// <dir>/<provider>.schemas/<model>.json.
+func (s *Store) schemaDir(provider string) string {
+	return filepath.Join(s.dir, url.PathEscape(provider)+".schemas")
+}
+
+func (s *Store) schemaPath(provider, model string) string {
+	return filepath.Join(s.schemaDir(provider), url.PathEscape(model)+".json")
+}
+
+// Schema returns the cached input schema of a model, or nil.
+func (s *Store) Schema(provider, model string) *imagegen.InputSchema {
+	if s == nil || provider == "" || model == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.schemaPath(provider, model))
+	if err != nil {
+		return nil
+	}
+	var sc imagegen.InputSchema
+	if json.Unmarshal(data, &sc) != nil || len(sc.Params) == 0 {
+		return nil
+	}
+	return &sc
+}
+
+// SaveSchema caches a model's input schema.
+func (s *Store) SaveSchema(provider string, sc *imagegen.InputSchema) error {
+	if s == nil {
+		return errors.New("catalog: no store")
+	}
+	data, err := json.MarshalIndent(sc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return assets.WriteFileAtomic(s.schemaPath(provider, sc.Model), data)
+}
+
+// FetchSchema asks a provider which inputs a model takes.
+func FetchSchema(ctx context.Context, p *config.Provider, model string) (*imagegen.InputSchema, error) {
+	return imagegen.ModelSchema(ctx, imagegen.Options{
+		Type: p.Type, BaseURL: p.BaseURL, APIKey: p.Key(), Headers: p.Headers, CatalogURL: p.CatalogURL,
+	}, model)
 }
 
 // Rename moves a provider's cached list to a new provider name.
@@ -96,9 +142,10 @@ func (s *Store) Rename(from, to string) {
 	if s == nil || from == "" || to == "" || from == to {
 		return
 	}
+	os.Rename(s.schemaDir(from), s.schemaDir(to))
 	if l := s.Get(from); l != nil {
 		if _, err := s.Save(to, l.Models); err == nil {
-			s.Delete(from)
+			os.Remove(s.path(from))
 		}
 	}
 }

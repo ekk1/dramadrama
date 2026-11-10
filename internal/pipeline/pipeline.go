@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ekk1/dramadrama/internal/assets"
+	"github.com/ekk1/dramadrama/internal/catalog"
 	"github.com/ekk1/dramadrama/internal/config"
 	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
@@ -54,10 +55,14 @@ type Service struct {
 	Prompts  *Prompts
 	// Log records every model request; nil disables logging.
 	Log *reqlog.Store
+	// Models caches the input schemas of video models; nil disables the cache.
+	Models *catalog.Store
 
 	// Factories; replaceable in tests.
 	NewLLM   func(p *config.Provider) (llm.Client, error)
 	NewImage func(p *config.Provider) (imagegen.Generator, error)
+	// FetchSchema asks a provider which inputs a model takes.
+	FetchSchema func(ctx context.Context, p *config.Provider, model string) (*imagegen.InputSchema, error)
 
 	mu      sync.Mutex
 	running map[string]context.CancelFunc
@@ -73,7 +78,8 @@ func New(cfg *config.Manager, projects *project.Store, lib *assets.Store, prompt
 		NewImage: func(p *config.Provider) (imagegen.Generator, error) {
 			return imagegen.New(imagegen.Options{Type: p.Type, BaseURL: p.BaseURL, APIKey: p.Key(), Headers: p.Headers})
 		},
-		running: map[string]context.CancelFunc{},
+		FetchSchema: catalog.FetchSchema,
+		running:     map[string]context.CancelFunc{},
 	}
 }
 
@@ -142,6 +148,8 @@ func (s *Service) Run(ctx context.Context, r RunRequest, emit Emit) error {
 		fn = func() (string, string, error) { return s.runShotPrompts(ctx, r, emit) }
 	case project.StageKeyframes:
 		fn = func() (string, string, error) { return s.runKeyframes(ctx, r, emit) }
+	case project.StageClips:
+		fn = func() (string, string, error) { return s.runClips(ctx, r, emit) }
 	default:
 		return fmt.Errorf("unknown stage %q", r.Stage)
 	}
@@ -170,7 +178,8 @@ func (s *Service) Run(ctx context.Context, r RunRequest, emit Emit) error {
 }
 
 func perItem(stage string) bool {
-	return stage == project.StageVisualImages || stage == project.StageShotPrompts || stage == project.StageKeyframes
+	return stage == project.StageVisualImages || stage == project.StageShotPrompts ||
+		stage == project.StageKeyframes || stage == project.StageClips
 }
 
 func setRun(p *project.Project, key string, r *project.Run) {
@@ -546,7 +555,7 @@ func (s *Service) generateImage(ctx context.Context, r RunRequest, target, promp
 		entry.Request["payload"] = d.DescribePayload(greq)
 	}
 	start := time.Now()
-	out, err := gen.Generate(ctx, greq)
+	out, err := s.runJob(ctx, r.ProjectID, project.RunKey(meta.Stage, target), provName, gen, greq, emit)
 	if err != nil {
 		s.writeLog(entry, start, err, emit)
 		return res, err
