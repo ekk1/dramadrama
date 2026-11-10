@@ -85,6 +85,10 @@
       return;
     }
     ev.preventDefault();
+    if (form.dataset.busy && ev.submitter) { // slow posts: show progress on the button
+      ev.submitter.disabled = true;
+      ev.submitter.textContent = form.dataset.busy;
+    }
     submitForm(form);
   });
 
@@ -251,6 +255,128 @@
     if (log) persistLog(logId, log, stateText || (label + ": " + T("finished")), failed);
     saveScroll();
     location.reload();
+  }
+
+  // ---------------------------------------------------------------- dialogs
+  document.addEventListener("click", (ev) => {
+    const opener = ev.target.closest("[data-dialog]");
+    if (opener) {
+      const dlg = document.getElementById(opener.dataset.dialog);
+      if (dlg) dlg.showModal();
+      return;
+    }
+    const closer = ev.target.closest("[data-close]");
+    if (closer) closer.closest("dialog").close();
+    else if (ev.target.matches("dialog.modal")) ev.target.close(); // click on the backdrop
+  });
+
+  // ---------------------------------------------------------------- model picker
+  const mp = document.getElementById("model-picker");
+  if (mp) {
+    const list = document.getElementById("mp-list");
+    const cat = document.getElementById("mp-cat");
+    const q = document.getElementById("mp-q");
+    const info = document.getElementById("mp-info");
+    const refresh = document.getElementById("mp-refresh");
+    const MAX = 300;
+    let models = [];
+    let provider = "";
+    let input = null;
+
+    function render() {
+      const words = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const hits = models.filter((m) => {
+        if (cat.value && m.category !== cat.value) return false;
+        const hay = (m.id + " " + (m.name || "") + " " + (m.description || "")).toLowerCase();
+        return words.every((w) => hay.includes(w));
+      });
+      list.textContent = "";
+      if (!models.length) { list.innerHTML = "<p></p>"; list.firstChild.textContent = T("No model list yet. Fetch it from the provider first."); return; }
+      if (!hits.length) { list.innerHTML = "<p></p>"; list.firstChild.textContent = T("No models match."); return; }
+      for (const m of hits.slice(0, MAX)) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "model-row" + (input && input.value === m.id ? " current" : "");
+        const name = document.createElement("span"); name.className = "m-name"; name.textContent = m.name || m.id;
+        const id = document.createElement("span"); id.className = "m-id"; id.textContent = m.id;
+        b.append(name, id);
+        if (m.category) { const t = document.createElement("span"); t.className = "tag"; t.textContent = m.category; b.append(t); }
+        if (m.description) { const d = document.createElement("span"); d.className = "m-desc"; d.textContent = m.description; b.append(d); }
+        b.addEventListener("click", () => {
+          input.value = m.id;
+          input.dispatchEvent(new Event("input", { bubbles: true })); // marks the form dirty
+          mp.close();
+          input.focus();
+        });
+        list.appendChild(b);
+      }
+      if (hits.length > MAX) {
+        const p = document.createElement("p");
+        p.textContent = T("Showing the first 300; type to narrow down.");
+        list.appendChild(p);
+      }
+    }
+
+    async function load(wantCategory) {
+      list.innerHTML = "<p></p>"; list.firstChild.textContent = T("Loading…");
+      info.textContent = "";
+      refresh.textContent = T("Fetch model list");
+      try {
+        const resp = await fetch("/api/models?provider=" + encodeURIComponent(provider));
+        if (!resp.ok) throw new Error((await resp.text()) || resp.statusText);
+        const data = await resp.json();
+        models = data.models || [];
+        const cats = [...new Set(models.map((m) => m.category).filter(Boolean))].sort();
+        cat.textContent = "";
+        cat.hidden = cats.length < 2;
+        cat.add(new Option(T("All categories"), ""));
+        for (const c of cats) cat.add(new Option(c, c));
+        cat.value = cats.includes(wantCategory) ? wantCategory : "";
+        if (models.length) {
+          info.textContent = models.length + " " + T("models") + " · " + T("Updated") + " " + data.fetched_at;
+          refresh.textContent = T("Refresh");
+        }
+        render();
+      } catch (err) {
+        models = [];
+        list.firstChild.textContent = T("Failed to load: ") + err.message;
+      }
+    }
+
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true;
+      refresh.textContent = T("Fetching…");
+      try {
+        const resp = await fetch("/settings/providers/models", {
+          method: "POST", headers: { Accept: "application/json" }, body: new URLSearchParams({ name: provider }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || resp.statusText);
+        await load(cat.value);
+      } catch (err) {
+        info.textContent = T("Failed: ") + err.message;
+        refresh.textContent = T("Fetch model list");
+      } finally {
+        refresh.disabled = false;
+      }
+    });
+
+    document.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-pick-model]");
+      if (!btn) return;
+      const scope = btn.closest("[data-model-scope]");
+      const sel = scope && scope.querySelector("select[data-provider]");
+      input = btn.parentElement.querySelector("input");
+      provider = sel ? sel.value : "";
+      if (!provider) { alert(T("Select a provider first.")); return; }
+      document.getElementById("mp-provider").textContent = provider;
+      q.value = "";
+      mp.showModal();
+      load(btn.dataset.category || "");
+      q.focus();
+    });
+    cat.addEventListener("change", render);
+    q.addEventListener("input", render);
   }
 
   // ---------------------------------------------------------------- step nav

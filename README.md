@@ -61,6 +61,13 @@ On first start, a config file is created with these providers:
 
 Export the variables you need, or store keys on the **Settings** page.
 
+Settings has three tabs: **Providers** (one card per provider; click to edit,
+fetch its model list, or delete), **Language models** (default provider and
+model per step) and **Image generation**. Every model field has a "Browse"
+button that opens the provider's model list with search; for fal the list can
+be filtered by category (text-to-image, image-to-image, image-to-video, …).
+Typing a model ID by hand still works.
+
 The workbench has no login. It listens on localhost by default and rejects
 cross-origin form posts. Don't expose it to a network without putting
 authentication in front of it.
@@ -74,6 +81,8 @@ data/
   assets/index.json           asset metadata (kind, provenance, tags, …)
   assets/files/<sha256>.<ext> asset content, de-duplicated
   prompts/<name>.tmpl         prompt template overrides (edit on the Prompts page)
+  models/<provider>.json      model list fetched from each provider (Settings → provider
+                              → "Fetch model list", or from any model picker)
   logs/<day>/<time>_….json    request log: one file per LLM call or media generation,
                               with the full prompt and output (view on the Logs page)
 ```
@@ -88,6 +97,7 @@ internal/imagegen  image generation interface; fal.ai queue API client
 internal/assets    asset library
 internal/project   project model and JSON store
 internal/config    configuration
+internal/catalog   cached provider model lists
 internal/reqlog    request log (one JSON file per model request)
 internal/pipeline  stage implementations and prompt templates (pipeline/prompts/*.tmpl)
 internal/server    HTTP handlers (html/template, SSE for streaming runs)

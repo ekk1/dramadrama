@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ekk1/dramadrama/internal/assets"
+	"github.com/ekk1/dramadrama/internal/catalog"
 	"github.com/ekk1/dramadrama/internal/config"
 	"github.com/ekk1/dramadrama/internal/pipeline"
 	"github.com/ekk1/dramadrama/internal/project"
@@ -56,11 +57,15 @@ func run(addr, dataDir, cfgPath, devDir string) error {
 	if err != nil {
 		return err
 	}
+	models, err := catalog.Open(filepath.Join(dataDir, "models"))
+	if err != nil {
+		return err
+	}
 	pipe := pipeline.New(cfg, projects, lib, prompts)
 	pipe.Log = logs
 
 	h, err := server.New(server.Options{
-		Config: cfg, Projects: projects, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, DevDir: devDir,
+		Config: cfg, Projects: projects, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, Models: models, DevDir: devDir,
 	})
 	if err != nil {
 		return err

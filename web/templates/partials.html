@@ -44,21 +44,21 @@
 
 {{/* Provider/model options for a group of run buttons. Params: ID, Kind ("llm"|"image"), Stage */}}
 {{define "opts"}}
-<div class="run-opts" id="{{.ID}}">
+<div class="run-opts" id="{{.ID}}" data-model-scope>
   {{if eq .Kind "llm"}}{{$sm := stageModel .Stage}}
   <label>{{t "Provider"}}
-    <select name="provider">
+    <select name="provider" data-provider>
       {{range providers "llm"}}<option value="{{.Name}}" {{if eq .Name $sm.Provider}}selected{{end}}>{{.Name}} ({{.Type}})</option>{{end}}
     </select>
   </label>
-  <label>{{t "Model"}} <input name="model" value="{{$sm.Model}}" placeholder="{{t "model id"}}"></label>
+  <label>{{t "Model"}} {{template "modelfield" dict "Name" "model" "Value" $sm.Model "Placeholder" (t "model id")}}</label>
   {{else}}{{$ic := imageCfg}}
   <label>{{t "Provider"}}
-    <select name="provider">
+    <select name="provider" data-provider>
       {{range providers "image"}}<option value="{{.Name}}" {{if eq .Name $ic.Provider}}selected{{end}}>{{.Name}}</option>{{end}}
     </select>
   </label>
-  <label>{{t "Model"}} <input name="model" value="" placeholder="{{t "auto"}}: {{$ic.Model}} / {{t "with refs"}}: {{$ic.RefModel}}"></label>
+  <label>{{t "Model"}} {{template "modelfield" dict "Name" "model" "Value" "" "Placeholder" (printf "%s: %s / %s: %s" (t "auto") $ic.Model (t "with refs") $ic.RefModel)}}</label>
   {{end}}
 </div>
 {{end}}
@@ -90,3 +90,9 @@
 
 {{/* Streaming output panel. Params: ID */}}
 {{define "log"}}<div class="run-log" id="{{.ID}}" hidden><div class="run-log-head"><span class="run-log-state"></span><button type="button" class="link run-log-stop" hidden>{{t "stop"}}</button><button type="button" class="link run-log-close">{{t "close"}}</button></div><pre></pre></div>{{end}}
+
+{{/* A model ID input with a button that opens the model picker. The
+     provider comes from the select[data-provider] in the enclosing
+     [data-model-scope]. Params: Name, Value, Placeholder, Label (aria,
+     translation key), Category (preselected filter) */}}
+{{define "modelfield"}}<span class="model-field"><input name="{{.Name}}" value="{{.Value}}" placeholder="{{.Placeholder}}" {{if .Label}}aria-label="{{t .Label}}"{{end}} autocomplete="off" spellcheck="false"><button type="button" class="btn small" data-pick-model data-category="{{.Category}}" title="{{t "Choose from the provider's model list"}}" aria-label="{{t "Choose from the provider's model list"}}">{{t "Browse"}}</button></span>{{end}}

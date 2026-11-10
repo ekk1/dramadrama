@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/ekk1/dramadrama/internal/assets"
+	"github.com/ekk1/dramadrama/internal/catalog"
 	"github.com/ekk1/dramadrama/internal/config"
 	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
@@ -57,6 +59,7 @@ func (fakeImage) Generate(ctx context.Context, req *imagegen.Request) (*imagegen
 
 type harness struct {
 	t   *testing.T
+	s   *Server
 	srv *httptest.Server
 	c   *http.Client
 	ps  *project.Store
@@ -79,14 +82,15 @@ func newHarness(t *testing.T) *harness {
 	pipe.Log = logs
 	pipe.NewLLM = func(*config.Provider) (llm.Client, error) { return fakeLLM{}, nil }
 	pipe.NewImage = func(*config.Provider) (imagegen.Generator, error) { return fakeImage{}, nil }
-	h, err := New(Options{Config: cfg, Projects: ps, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs})
+	models, _ := catalog.Open(filepath.Join(dir, "models"))
+	h, err := New(Options{Config: cfg, Projects: ps, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, Models: models})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &harness{t: t, srv: srv, c: &http.Client{Jar: jar}, ps: ps}
+	return &harness{t: t, s: h, srv: srv, c: &http.Client{Jar: jar}, ps: ps}
 }
 
 func (h *harness) get(path string) string {
@@ -106,6 +110,17 @@ func (h *harness) get(path string) string {
 // post submits a form and returns the final URL after redirects.
 func (h *harness) post(path string, form url.Values) *url.URL {
 	h.t.Helper()
+	u := h.postErr(path, form)
+	if e := u.Query().Get("err"); e != "" {
+		h.t.Fatalf("POST %s: error %s", path, e)
+	}
+	return u
+}
+
+// postErr is post for requests that are expected to be rejected: the
+// error comes back in the redirect's "err" parameter.
+func (h *harness) postErr(path string, form url.Values) *url.URL {
+	h.t.Helper()
 	resp, err := h.c.PostForm(h.srv.URL+path, form)
 	if err != nil {
 		h.t.Fatal(err)
@@ -114,9 +129,6 @@ func (h *harness) post(path string, form url.Values) *url.URL {
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		h.t.Fatalf("POST %s: %d %s", path, resp.StatusCode, body)
-	}
-	if e := resp.Request.URL.Query().Get("err"); e != "" {
-		h.t.Fatalf("POST %s: error %s", path, e)
 	}
 	return resp.Request.URL
 }
@@ -236,31 +248,72 @@ func TestSettingsAndPrompts(t *testing.T) {
 	if !strings.Contains(page, "ANTHROPIC_API_KEY") {
 		t.Fatal("settings page missing providers")
 	}
-	form := url.Values{
-		"p_orig":       {"anthropic", "fal", ""},
-		"p_name":       {"claude", "fal", "local"},
-		"p_type":       {"anthropic", "fal", "openai_chat"},
-		"p_base_url":   {"", "", "http://localhost:11434/v1"},
-		"p_key":        {"sk-secret", "", ""},
-		"p_key_env":    {"", "FAL_KEY", ""},
-		"p_headers":    {"", "", "X-Test: 1"},
-		"img_provider": {"fal"},
-		"img_model":    {"fal-ai/flux/dev"},
-		"img_aspect":   {"9:16"},
-		"img_extra":    {`{"num_inference_steps": 20}`},
+	// Rename a provider and store a key: settings that named it follow.
+	h.post("/settings/providers", url.Values{"orig": {"anthropic"}, "name": {"claude"}, "type": {"anthropic"}, "key": {"sk-secret"}})
+	// Add a local provider with a header.
+	h.post("/settings/providers", url.Values{
+		"name": {"local"}, "type": {"openai_chat"}, "base_url": {"http://localhost:11434/v1"}, "headers": {"X-Test: 1"},
+	})
+	c := h.s.cfg.Get()
+	if c.Provider("anthropic") != nil || c.Provider("claude").APIKey != "sk-secret" || c.Stages["idea"].Provider != "claude" {
+		t.Fatalf("rename not applied: %+v %+v", c.Providers, c.Stages)
 	}
-	for _, st := range config.LLMStages {
-		form.Set("st_"+st+"_provider", "anthropic") // old name: must follow the rename
-		form.Set("st_"+st+"_model", "m")
+	if lp := c.Provider("local"); lp == nil || lp.Headers["X-Test"] != "1" {
+		t.Fatalf("provider not added: %+v", c.Providers)
 	}
-	form.Set("st_idea_temperature", "0.7")
-	h.post("/settings", form)
+	// An empty key field keeps the stored key; the box clears it.
+	h.post("/settings/providers", url.Values{"orig": {"claude"}, "name": {"claude"}, "type": {"anthropic"}})
+	if h.s.cfg.Get().Provider("claude").APIKey != "sk-secret" {
+		t.Error("stored key lost on save")
+	}
 	page = h.get("/settings")
 	if strings.Contains(page, "sk-secret") {
 		t.Error("API key rendered in page")
 	}
-	if !strings.Contains(page, "•••• stored") || !strings.Contains(page, "localhost:11434") {
-		t.Error("settings not saved")
+	if !strings.Contains(page, "•••• stored") || !strings.Contains(page, "localhost:11434") || !strings.Contains(page, "key stored") {
+		t.Error("providers tab incomplete")
+	}
+	h.post("/settings/providers", url.Values{"orig": {"claude"}, "name": {"claude"}, "type": {"anthropic"}, "key_clear": {"1"}})
+	if h.s.cfg.Get().Provider("claude").APIKey != "" {
+		t.Error("stored key not cleared")
+	}
+	// Invalid input is rejected and reported.
+	if u := h.postErr("/settings/providers", url.Values{"name": {"local"}, "type": {"openai_chat"}}); !strings.Contains(u.Query().Get("err"), "duplicate") {
+		t.Errorf("duplicate name accepted: %s", u)
+	}
+
+	// Step defaults and image settings save separately.
+	form := url.Values{"st_idea_temperature": {"0.7"}, "st_idea_max_tokens": {"900"}, "st_idea_send_images": {"1"}}
+	for _, st := range config.LLMStages {
+		form.Set("st_"+st+"_provider", "local")
+		form.Set("st_"+st+"_model", "m-"+st)
+	}
+	h.post("/settings/stages", form)
+	h.post("/settings/image", url.Values{
+		"img_provider": {"fal"}, "img_model": {"fal-ai/x"}, "img_ref_model": {"fal-ai/y"}, "img_aspect": {"16:9"},
+		"img_extra": {`{"num_inference_steps": 20}`},
+	})
+	c = h.s.cfg.Get()
+	if sm := c.Stages["idea"]; sm.Provider != "local" || sm.Model != "m-idea" || *sm.Temperature != 0.7 || sm.MaxTokens != 900 || !sm.SendImages {
+		t.Errorf("stage not saved: %+v", sm)
+	}
+	if c.Image.Model != "fal-ai/x" || c.Image.AspectRatio != "16:9" || c.Image.Extra["num_inference_steps"] != float64(20) {
+		t.Errorf("image settings not saved: %+v", c.Image)
+	}
+	if u := h.postErr("/settings/image", url.Values{"img_provider": {"fal"}, "img_extra": {"[1]"}}); u.Query().Get("err") == "" {
+		t.Error("bad extra JSON accepted")
+	}
+	for _, tab := range []string{"llm", "image"} {
+		if page := h.get("/settings?tab=" + tab); !strings.Contains(page, "data-pick-model") {
+			t.Errorf("tab %s has no model picker", tab)
+		}
+	}
+
+	// Deleting a provider clears the settings that used it.
+	h.post("/settings/providers/delete", url.Values{"name": {"local"}})
+	c = h.s.cfg.Get()
+	if c.Provider("local") != nil || c.Stages["idea"].Provider != "" || c.Stages["idea"].Model != "m-idea" {
+		t.Errorf("delete: %+v %+v", c.Providers, c.Stages["idea"])
 	}
 
 	h.get("/prompts")
@@ -367,5 +420,87 @@ func TestRequestLogPages(t *testing.T) {
 	h.post("/logs/delete", url.Values{"all": {"1"}})
 	if page := h.get("/logs"); !strings.Contains(page, "Nothing recorded yet.") {
 		t.Error("log not cleared")
+	}
+}
+
+func TestModelLists(t *testing.T) {
+	h := newHarness(t)
+	var asked []string
+	h.s.fetchModels = func(_ context.Context, p *config.Provider) ([]catalog.Model, error) {
+		asked = append(asked, p.Name)
+		if p.Name == "gemini" {
+			return nil, errors.New("HTTP 401: bad key")
+		}
+		return []catalog.Model{
+			{ID: "fal-ai/flux/dev", Name: "FLUX <dev>", Category: "text-to-image"},
+			{ID: "minimax/h3-max/reference-to-video", Category: "image-to-video"},
+		}, nil
+	}
+	getJSON := func(path string) (int, string) {
+		resp, err := h.c.Get(h.srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	// Nothing cached yet.
+	if code, body := getJSON("/api/models?provider=fal"); code != 200 || !strings.Contains(body, `"models":[]`) {
+		t.Fatalf("empty list: %d %s", code, body)
+	}
+	if code, _ := getJSON("/api/models?provider=nope"); code != http.StatusNotFound {
+		t.Errorf("unknown provider: %d", code)
+	}
+
+	// Fetch from the settings page: redirects with a message.
+	u := h.post("/settings/providers/models", url.Values{"name": {"fal"}})
+	if msg := u.Query().Get("msg"); msg != "Fetched 2 models from fal" {
+		t.Errorf("message %q (%s)", msg, u)
+	}
+	if page := h.get("/settings"); !strings.Contains(page, "2 models") {
+		t.Error("provider card does not show the model count")
+	}
+	_, body := getJSON("/api/models?provider=fal")
+	for _, want := range []string{`"id":"fal-ai/flux/dev"`, `"category":"image-to-video"`, `"fetched_at":"20`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("api models missing %s: %s", want, body)
+		}
+	}
+
+	// Fetch from the picker (JSON), including a provider error.
+	post := func(name string) (int, string) {
+		req, _ := http.NewRequest("POST", h.srv.URL+"/settings/providers/models", strings.NewReader(url.Values{"name": {name}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "application/json")
+		resp, err := h.c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := post("fal"); code != 200 || !strings.Contains(body, `"count":2`) {
+		t.Errorf("json fetch: %d %s", code, body)
+	}
+	if code, body := post("gemini"); code != http.StatusBadGateway || !strings.Contains(body, "bad key") {
+		t.Errorf("json fetch error: %d %s", code, body)
+	}
+	if u := h.postErr("/settings/providers/models", url.Values{"name": {"gemini"}}); !strings.Contains(u.Query().Get("err"), "bad key") {
+		t.Errorf("fetch error not reported: %s", u)
+	}
+
+	// The cached list follows a rename and goes away with the provider.
+	h.post("/settings/providers", url.Values{"orig": {"fal"}, "name": {"fal2"}, "type": {"fal"}})
+	if _, body := getJSON("/api/models?provider=fal2"); !strings.Contains(body, "fal-ai/flux/dev") {
+		t.Error("model list did not follow the rename")
+	}
+	h.post("/settings/providers/delete", url.Values{"name": {"fal2"}})
+	if h.s.models.Get("fal2") != nil {
+		t.Error("model list not deleted with the provider")
+	}
+	if len(asked) != 4 {
+		t.Errorf("fetches: %v", asked)
 	}
 }
