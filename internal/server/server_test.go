@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ekk1/dramadrama/internal/assets"
 	"github.com/ekk1/dramadrama/internal/catalog"
@@ -54,6 +55,9 @@ func (f fakeLLM) Stream(ctx context.Context, req *llm.Request) iter.Seq2[llm.Chu
 type fakeImage struct{}
 
 func (fakeImage) Generate(ctx context.Context, req *imagegen.Request) (*imagegen.Result, error) {
+	if req.Kind == imagegen.KindVideo {
+		return &imagegen.Result{Videos: []imagegen.Image{{MIME: "video/mp4", Data: []byte("mp4:" + req.Prompt)}}}, nil
+	}
 	return &imagegen.Result{Images: []imagegen.Image{{MIME: "image/png", Data: []byte("png:" + req.Prompt)}}}, nil
 }
 
@@ -80,9 +84,10 @@ func newHarness(t *testing.T) *harness {
 	pipe := pipeline.New(cfg, ps, lib, prompts)
 	logs, _ := reqlog.Open(filepath.Join(dir, "logs"))
 	pipe.Log = logs
+	models, _ := catalog.Open(filepath.Join(dir, "models"))
+	pipe.Models = models
 	pipe.NewLLM = func(*config.Provider) (llm.Client, error) { return fakeLLM{}, nil }
 	pipe.NewImage = func(*config.Provider) (imagegen.Generator, error) { return fakeImage{}, nil }
-	models, _ := catalog.Open(filepath.Join(dir, "models"))
 	h, err := New(Options{Config: cfg, Projects: ps, Assets: lib, Pipeline: pipe, Prompts: prompts, Logs: logs, Models: models})
 	if err != nil {
 		t.Fatal(err)
@@ -149,6 +154,23 @@ func (h *harness) run(pid, stage, target string) string {
 		h.t.Fatalf("run %s did not finish: %s", stage, body)
 	}
 	return string(body)
+}
+
+// upload posts one file to a project list and returns the final URL.
+func (h *harness) upload(pid, target, name string, data []byte) *url.URL {
+	h.t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	mw.WriteField("target", target)
+	fw, _ := mw.CreateFormFile("files", name)
+	fw.Write(data)
+	mw.Close()
+	resp, err := h.c.Post(h.srv.URL+"/projects/"+pid+"/upload", mw.FormDataContentType(), &body)
+	if err != nil || resp.StatusCode != 200 {
+		h.t.Fatalf("upload: %v", err)
+	}
+	resp.Body.Close()
+	return resp.Request.URL
 }
 
 func pngFile(t *testing.T) []byte {
@@ -366,15 +388,15 @@ func TestBackRedirectValidation(t *testing.T) {
 func TestProjectSteps(t *testing.T) {
 	p := &project.Project{Idea: "x"}
 	got := projectSteps(p)
-	if len(got) != 6 || got[0].State != "done" || got[1].State != "" || got[5].Info != "" {
+	if len(got) != 7 || got[0].State != "done" || got[1].State != "" || got[5].Info != "" {
 		t.Fatalf("empty project: %+v", got)
 	}
 	p.Story = "s"
 	p.Visuals = []project.VisualPrompt{{ID: "v1", AssetIDs: []string{"a"}}, {ID: "v2"}}
-	p.Shots = []project.Shot{{ID: "s1", KeyframePrompt: "k", KeyframeIDs: []string{"a"}}, {ID: "s2", KeyframePrompt: "k"}}
+	p.Shots = []project.Shot{{ID: "s1", KeyframePrompt: "k", KeyframeIDs: []string{"a"}, ClipIDs: []string{"c"}}, {ID: "s2", KeyframePrompt: "k"}}
 	got = projectSteps(p)
 	want := []struct{ state, info string }{
-		{"done", ""}, {"done", ""}, {"partial", "1/2"}, {"done", "2"}, {"done", "2/2"}, {"partial", "1/2"},
+		{"done", ""}, {"done", ""}, {"partial", "1/2"}, {"done", "2"}, {"done", "2/2"}, {"partial", "1/2"}, {"partial", "1/2"},
 	}
 	for i, w := range want {
 		if got[i].State != w.state || got[i].Info != w.info {
@@ -503,4 +525,125 @@ func TestModelLists(t *testing.T) {
 	if len(asked) != 4 {
 		t.Errorf("fetches: %v", asked)
 	}
+}
+
+// mp4File is the start of an MP4 file, enough to be sniffed as video.
+var mp4File = []byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom........")
+
+func TestVideoClips(t *testing.T) {
+	h := newHarness(t)
+	h.s.pipe.FetchSchema = func(context.Context, *config.Provider, string) (*imagegen.InputSchema, error) {
+		return &imagegen.InputSchema{Model: config.DefaultVideoModel, Params: []imagegen.Param{
+			{Name: "prompt", Type: "string"}, {Name: "first_frame_image_url", Type: "string"}, {Name: "last_frame_image_url", Type: "string"},
+			{Name: "reference_video_urls", Type: "array"}, {Name: "duration", Type: "string", Enum: []string{"5", "10"}}, {Name: "resolution", Type: "string"},
+		}}, nil
+	}
+	h.s.fetchSchema = h.s.pipe.FetchSchema
+	// Use the real fal payload logic to explain the mapping.
+	real, _ := imagegen.New(imagegen.Options{Type: imagegen.TypeFal})
+	h.s.pipe.NewImage = func(*config.Provider) (imagegen.Generator, error) {
+		return explainingFake{real.(imagegen.Explainer)}, nil
+	}
+	u := h.post("/projects", url.Values{"name": {"Clip"}, "idea": {"x"}})
+	pid := strings.TrimPrefix(u.Path, "/projects/")
+	h.run(pid, "idea", "")
+	h.run(pid, "storyboard", "")
+	h.run(pid, "shot_prompts", "all")
+	h.run(pid, "keyframes", "all")
+	p, _ := h.ps.Get(pid)
+	sid := p.Shots[0].ID
+
+	// Each list only takes its own media type.
+	if u := h.upload(pid, "vref:"+sid, "ref.png", pngFile(t)); !strings.Contains(u.Query().Get("err"), "video files") {
+		t.Errorf("image accepted as reference video: %s", u)
+	}
+	if u := h.upload(pid, "vref:"+sid, "motion.mp4", mp4File); u.Query().Get("err") != "" {
+		t.Fatalf("video upload: %s", u)
+	}
+	// Audio is recognised by file name where sniffing cannot tell (.m4a looks like MP4).
+	if u := h.upload(pid, "aref:"+sid, "voice.m4a", mp4File); u.Query().Get("err") != "" {
+		t.Fatalf("audio upload: %s", u)
+	}
+	if u := h.upload(pid, "endframe:"+sid, "end.png", pngFile(t)); u.Query().Get("err") != "" {
+		t.Fatalf("end frame upload: %s", u)
+	}
+	p, _ = h.ps.Get(pid)
+	sh := p.Shots[0]
+	if len(sh.VideoRefIDs) != 1 || len(sh.AudioRefIDs) != 1 || len(sh.EndFrameIDs) != 1 {
+		t.Fatalf("lists: %+v", sh)
+	}
+	if u := h.postErr("/projects/"+pid+"/refs", url.Values{"target": {"aref:" + sid}, "asset_id": {sh.VideoRefIDs[0]}, "op": {"add"}}); !strings.Contains(u.Query().Get("err"), "audio files") {
+		t.Errorf("video accepted as reference audio: %s", u)
+	}
+
+	stream := h.run(pid, "clips", sid)
+	for _, want := range []string{"first frame → first_frame_image_url", "last frame → last_frame_image_url", "reference audio: not supported by this model", "duration → duration = 5"} {
+		if !strings.Contains(stream, want) {
+			t.Errorf("stream missing %q:\n%s", want, stream)
+		}
+	}
+	p, _ = h.ps.Get(pid)
+	if len(p.Shots[0].ClipIDs) != 1 {
+		t.Fatalf("no clip: %+v", p.Shots[0])
+	}
+	page := h.get("/projects/" + pid)
+	for _, want := range []string{`id="s7"`, "Video clips", `<video src="/assets/` + p.Shots[0].Clip() + `/file"`, "<audio", "Last frame", "7</span>"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("project page missing %q", want)
+		}
+	}
+	// The clip is in the library as video, and the picker can filter by media.
+	if lib := h.get("/assets?media=video"); !strings.Contains(lib, `id="a-`+p.Shots[0].Clip()+`"`) || strings.Contains(lib, `id="a-`+sh.EndFrameIDs[0]+`"`) {
+		t.Error("media filter on the asset library")
+	}
+	resp, _ := h.c.Get(h.srv.URL + "/api/assets?media=audio")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), sh.AudioRefIDs[0]) || strings.Contains(string(body), p.Shots[0].Clip()) {
+		t.Errorf("api media filter: %s", body)
+	}
+
+	// Settings: the video tab shows how the cached schema maps, and saves.
+	tab := h.get("/settings?tab=video")
+	for _, want := range []string{"first_frame_image_url", "reference_video_urls", "not supported", "resolution", "minimax/h3-max/reference-to-video"} {
+		if !strings.Contains(tab, want) {
+			t.Errorf("video tab missing %q", want)
+		}
+	}
+	h.post("/settings/video", url.Values{
+		"vid_provider": {"fal"}, "vid_model": {"acme/i2v"}, "vid_extra": {`{"resolution":"1080p"}`}, "vid_mapping": {`{"last_frame":"end_image_url"}`},
+	})
+	vc := h.s.cfg.Get().Video
+	if vc.Model != "acme/i2v" || vc.Extra["resolution"] != "1080p" || vc.Mapping["last_frame"] != "end_image_url" {
+		t.Errorf("video settings: %+v", vc)
+	}
+	if u := h.postErr("/settings/video", url.Values{"vid_provider": {"fal"}, "vid_mapping": {`{"bogus":"x"}`}}); !strings.Contains(u.Query().Get("err"), "unknown input role") {
+		t.Errorf("bad mapping accepted: %s", u)
+	}
+	h.post("/settings/video/schema", url.Values{})
+	if h.s.models.Schema("fal", "acme/i2v") == nil {
+		t.Error("schema not fetched for the new model")
+	}
+
+	// An unfinished job is shown and can be discarded.
+	key := project.RunKey(project.StageClips, sid)
+	h.ps.Update(pid, func(p *project.Project) error {
+		p.Jobs = map[string]*project.Job{key: {Provider: "fal", Model: "acme/i2v", RequestID: "req-9", SubmittedAt: time.Now()}}
+		return nil
+	})
+	if page := h.get("/projects/" + pid); !strings.Contains(page, "An earlier request is unfinished") || !strings.Contains(page, "req-9") {
+		t.Error("unfinished job not shown")
+	}
+	h.post("/projects/"+pid+"/jobs/discard", url.Values{"key": {key}})
+	if p, _ := h.ps.Get(pid); len(p.Jobs) != 0 {
+		t.Errorf("job not discarded: %v", p.Jobs)
+	}
+}
+
+// explainingFake generates like fakeImage but explains like the real fal
+// generator.
+type explainingFake struct{ imagegen.Explainer }
+
+func (explainingFake) Generate(ctx context.Context, req *imagegen.Request) (*imagegen.Result, error) {
+	return fakeImage{}.Generate(ctx, req)
 }

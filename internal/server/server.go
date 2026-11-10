@@ -54,6 +54,8 @@ type Server struct {
 	models   *catalog.Store
 	// fetchModels downloads a provider's model list; replaceable in tests.
 	fetchModels func(ctx context.Context, p *config.Provider) ([]catalog.Model, error)
+	// fetchSchema downloads a model's input schema; replaceable in tests.
+	fetchSchema func(ctx context.Context, p *config.Provider, model string) (*imagegen.InputSchema, error)
 	files       fs.FS
 	dev         bool
 
@@ -65,7 +67,7 @@ type Server struct {
 // New builds the server and parses the templates.
 func New(o Options) (*Server, error) {
 	s := &Server{
-		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts, logs: o.Logs, models: o.Models, fetchModels: catalog.Fetch,
+		cfg: o.Config, projects: o.Projects, assets: o.Assets, pipe: o.Pipeline, prompts: o.Prompts, logs: o.Logs, models: o.Models, fetchModels: catalog.Fetch, fetchSchema: catalog.FetchSchema,
 		files: web.FS, pages: map[string]*template.Template{},
 	}
 	if o.DevDir != "" {
@@ -107,6 +109,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /projects/{id}/upload", s.handleProjectUpload)
 	m.HandleFunc("POST /projects/{id}/run/{stage}", s.handleRun)
 	m.HandleFunc("POST /projects/{id}/cancel", s.handleCancel)
+	m.HandleFunc("POST /projects/{id}/jobs/discard", s.handleDiscardJob)
 
 	m.HandleFunc("GET /assets", s.handleAssets)
 	m.HandleFunc("POST /assets/upload", s.handleLibraryUpload)
@@ -125,6 +128,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /settings/providers/models", s.handleFetchModels)
 	m.HandleFunc("POST /settings/stages", s.handleSaveStages)
 	m.HandleFunc("POST /settings/image", s.handleSaveImage)
+	m.HandleFunc("POST /settings/video", s.handleSaveVideo)
+	m.HandleFunc("POST /settings/video/schema", s.handleFetchSchema)
 	m.HandleFunc("GET /api/models", s.handleAPIModels)
 	m.HandleFunc("GET /lang/{lang}", s.handleLang)
 	m.HandleFunc("GET /prompts", s.handlePrompts)
@@ -218,6 +223,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v v
 	w.Write(buf.Bytes())
 }
 
+// jobView is an unfinished provider job, for display.
+type jobView struct {
+	Key, RequestID, Model, When string
+}
+
 // runView is a display-friendly run record.
 type runView struct {
 	Status, Error, Provider, Model, When, Key string
@@ -244,6 +254,22 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return v
 		},
+		"job": func(p *project.Project, stage, target string) *jobView {
+			key := project.RunKey(stage, target)
+			j := p.Jobs[key]
+			if j == nil || s.pipe.IsRunning(p.ID, key) || s.pipe.IsRunning(p.ID, project.RunKey(stage, "all")) {
+				return nil
+			}
+			return &jobView{Key: key, RequestID: j.RequestID, Model: j.Model, When: fmtTime(j.SubmittedAt)}
+		},
+		// nextKeyframe is the keyframe in use of the shot after index i.
+		"nextKeyframe": func(p *project.Project, i int) string {
+			if i+1 < len(p.Shots) {
+				return p.Shots[i+1].Keyframe()
+			}
+			return ""
+		},
+		"videoCfg": func() config.VideoConfig { return s.cfg.Get().Video },
 		"shotRefs": func(p *project.Project, sh *project.Shot) map[string]any {
 			ids, auto := pipeline.ShotRefs(p, sh)
 			return map[string]any{"IDs": ids, "Auto": auto}
@@ -265,15 +291,19 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return ids[len(ids)-1]
 		},
-		"steps":     projectSteps,
-		"initial":   initial,
-		"arClass":   func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
-		"t":         func(s string) string { return s }, // replaced per request in render
-		"join":      strings.Join,
-		"time":      fmtTime,
-		"clock":     func(t time.Time) string { return t.Local().Format("15:04:05") },
-		"second":    func(t time.Time) string { return t.Local().Format("05") },
-		"duration":  fmtDuration,
+		"steps":      projectSteps,
+		"initial":    initial,
+		"arClass":    func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
+		"t":          func(s string) string { return s }, // replaced per request in render
+		"join":       strings.Join,
+		"time":       fmtTime,
+		"clock":      func(t time.Time) string { return t.Local().Format("15:04:05") },
+		"second":     func(t time.Time) string { return t.Local().Format("05") },
+		"duration":   fmtDuration,
+		"mediaTypes": func() []string { return []string{"image", "video", "audio"} },
+		"mediaName": func(m string) string {
+			return map[string]string{"image": "Image", "video": "Video", "audio": "Audio"}[m]
+		},
 		"logKind":   logKind,
 		"stageName": stageName,
 		"logKinds":  func() []string { return []string{reqlog.KindLLM, reqlog.KindImage, reqlog.KindVideo} },
@@ -305,7 +335,7 @@ type stepView struct {
 }
 
 // projectSteps summarises how far a project has progressed through the
-// six steps. A step is "done" when it has output for every item it covers
+// steps. A step is "done" when it has output for every item it covers
 // and "partial" when only some items have output.
 func projectSteps(p *project.Project) []stepView {
 	state := func(n, of int) string {
@@ -335,7 +365,7 @@ func projectSteps(p *project.Project) []stepView {
 		}
 		return fmt.Sprintf("%d/%d", n, of)
 	}
-	var images, prompts, keyframes int
+	var images, prompts, keyframes, clips int
 	for _, v := range p.Visuals {
 		if len(v.AssetIDs) > 0 {
 			images++
@@ -348,6 +378,9 @@ func projectSteps(p *project.Project) []stepView {
 		if len(sh.KeyframeIDs) > 0 {
 			keyframes++
 		}
+		if len(sh.ClipIDs) > 0 {
+			clips++
+		}
 	}
 	return []stepView{
 		{1, "Input", flag(strings.TrimSpace(p.Idea) != ""), ""},
@@ -356,6 +389,7 @@ func projectSteps(p *project.Project) []stepView {
 		{4, "Storyboard", flag(len(p.Shots) > 0), count(len(p.Shots))},
 		{5, "Shot prompts", state(prompts, len(p.Shots)), ratio(prompts, len(p.Shots))},
 		{6, "Keyframes", state(keyframes, len(p.Shots)), ratio(keyframes, len(p.Shots))},
+		{7, "Video", state(clips, len(p.Shots)), ratio(clips, len(p.Shots))},
 	}
 }
 

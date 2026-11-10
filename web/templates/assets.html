@@ -10,6 +10,10 @@
       <option value="">{{t "Any kind"}}</option>
       {{range kinds}}<option value="{{.}}" {{if eq (printf "%s" .) (printf "%s" $d.F.Kind)}}selected{{end}}>{{t (printf "%s" .)}}</option>{{end}}
     </select>
+    <select name="media" aria-label="{{t "Media type"}}">
+      <option value="">{{t "Any media"}}</option>
+      {{range mediaTypes}}<option value="{{.}}" {{if eq . $d.F.Media}}selected{{end}}>{{t (mediaName .)}}</option>{{end}}
+    </select>
     <select name="tag" aria-label="{{t "Tags"}}">
       <option value="">{{t "Any tag"}}</option>
       {{range $d.Tags}}<option value="{{.}}" {{if eq . $d.F.Tag}}selected{{end}}>{{.}}</option>{{end}}
@@ -21,7 +25,7 @@
   <details class="upload-box">
     <summary>{{t "Upload to library"}}</summary>
     <form method="post" action="/assets/upload" enctype="multipart/form-data" class="grid-form">
-      <label>{{t "Files"}} <input type="file" name="files" accept="image/*,video/*" multiple required></label>
+      <label>{{t "Files"}} <input type="file" name="files" accept="image/*,video/*,audio/*" multiple required></label>
       <label>{{t "Kind"}} <select name="kind">{{range kinds}}<option value="{{.}}">{{t (printf "%s" .)}}</option>{{end}}</select></label>
       <label>{{t "Project"}}
         <select name="project"><option value="">{{t "(none: shared)"}}</option>{{range $id, $name := $d.Projects}}<option value="{{$id}}">{{$name}}</option>{{end}}</select>
@@ -36,9 +40,7 @@
 <div class="asset-grid">
 {{range $d.Assets}}
   <article class="asset-card" id="a-{{.ID}}">
-    <a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" class="asset-thumb">
-      {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted controls></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
-    </a>
+    <div class="asset-thumb media-{{.Media}}">{{template "media" .}}</div>
     <div class="asset-meta">
       <strong title="{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
       <div class="small"><span class="tag">{{t (printf "%s" .Kind)}}</span>{{range .Tags}} <a class="tag" href="/assets?tag={{.}}">{{.}}</a>{{end}}</div>

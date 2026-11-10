@@ -5,6 +5,7 @@
     <a class="side-item {{if eq $d.Tab "providers"}}current{{end}}" href="/settings?tab=providers"><span>{{t "Providers"}}</span><span class="step-info">{{add (len $d.LLM) (len $d.Media)}}</span></a>
     <a class="side-item {{if eq $d.Tab "llm"}}current{{end}}" href="/settings?tab=llm"><span>{{t "Language models"}}</span></a>
     <a class="side-item {{if eq $d.Tab "image"}}current{{end}}" href="/settings?tab=image"><span>{{t "Image generation"}}</span></a>
+    <a class="side-item {{if eq $d.Tab "video"}}current{{end}}" href="/settings?tab=video"><span>{{t "Video generation"}}</span></a>
   </nav>
   <div>
 
@@ -71,6 +72,44 @@
     <div class="actions"><button class="btn primary">{{t "Save"}}</button></div>
   </section>
   </form>
+  {{end}}
+
+  {{if eq $d.Tab "video"}}
+  <form method="post" action="/settings/video" data-save>
+  <section class="stage" data-model-scope>
+    <h2>{{t "Video generation"}}</h2>
+    <div class="grid-form provider-model">
+      <label>{{t "Provider"}} <select name="vid_provider" data-provider><option value="">{{t "(none)"}}</option>{{range providers "image"}}<option {{if eq .Name $d.Video.Provider}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+      <label>{{t "Video model"}} {{template "modelfield" dict "Name" "vid_model" "Value" $d.Video.Model "Placeholder" "minimax/h3-max/reference-to-video" "Category" "image-to-video"}}</label>
+      <label class="wide">{{t "Extra parameters"}} <span class="muted">{{t `(JSON object merged into every request, e.g. {"resolution": "1080p"})`}}</span>
+        <textarea name="vid_extra" rows="3" class="mono">{{$d.VideoExtra}}</textarea></label>
+      <label class="wide">{{t "Input mapping override"}} <span class="muted">{{t `(optional JSON, role → field name, for this model only; "-" switches a role off)`}}</span>
+        <textarea name="vid_mapping" rows="2" class="mono" placeholder='{"last_frame": "end_image_url"}'>{{$d.VideoMapping}}</textarea></label>
+    </div>
+    <div class="actions"><button class="btn primary">{{t "Save"}}</button></div>
+  </section>
+  </form>
+
+  <section class="stage">
+    <h2>{{t "How this model's inputs are used"}}</h2>
+    <p class="muted small hint">{{if $d.HasSchema}}{{t "Detected from the model's published input list. Inputs the model lacks are skipped and reported in the run log."}}{{else}}{{t "The model's input list has not been fetched yet, so only the prompt and the first frame would be sent. It is fetched automatically on the first run, or now:"}}{{end}}</p>
+    <div class="table-wrap"><table class="settings-table roles-table">
+      <thead><tr><th>{{t "Input"}}</th><th>{{t "Model field"}}</th><th>{{t "Accepts"}}</th></tr></thead>
+      <tbody>
+      {{range $d.Roles}}<tr><td>{{t .Label}}</td><td>{{if .Field}}<code>{{.Field}}</code>{{else}}<span class="muted">{{t "not supported"}}</span>{{end}}</td><td class="muted small">{{.Note}}</td></tr>{{end}}
+      </tbody>
+    </table></div>
+    {{if $d.Others}}
+    <details class="upload-box">
+      <summary>{{t "Other inputs of this model"}} ({{len $d.Others}})</summary>
+      <p class="muted small">{{t "Set any of these through Extra parameters."}}</p>
+      <ul class="param-list">{{range $d.Others}}<li><code>{{.Name}}</code> <span class="muted small">{{if .Enum}}{{join .Enum " / "}}{{else}}{{.Type}}{{end}}{{if .Description}} — {{trunc .Description 160}}{{end}}</span></li>{{end}}</ul>
+    </details>
+    {{end}}
+    <form method="post" action="/settings/video/schema" class="actions" data-busy="{{t "Fetching…"}}">
+      <button class="btn">{{if $d.HasSchema}}{{t "Refresh input list"}}{{else}}{{t "Fetch input list"}}{{end}}</button>
+    </form>
+  </section>
   {{end}}
 
   </div>

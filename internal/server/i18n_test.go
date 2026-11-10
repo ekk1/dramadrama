@@ -50,6 +50,13 @@ func TestTemplateKeysTranslated(t *testing.T) {
 	for _, k := range stageNames {
 		goKeys = append(goKeys, k)
 	}
+	for _, k := range roleLabels {
+		goKeys = append(goKeys, k)
+	}
+	goKeys = append(goKeys, "Image", "Video", "Audio", "This shot has no keyframe: generating without a first frame.",
+		"The request changed since the unfinished one was submitted: cancelling that one.",
+		"The request is still with the provider. Run this step again to collect its result.",
+		"The model's parameter list is unknown: only the prompt and the first frame are sent.")
 	goKeys = append(goKeys, "ok", "error", "System prompt", "User prompt", "Prompt", "Output", "Parameters", "Details")
 	goKeys = append(goKeys, jsKeys...)
 	for _, k := range goKeys {
@@ -65,9 +72,13 @@ func TestTemplateKeysTranslated(t *testing.T) {
 // TestPipelineErrorsTranslated checks the fixed error messages of the
 // pipeline, which are shown in the UI.
 func TestPipelineErrorsTranslated(t *testing.T) {
-	src, err := os.ReadFile("../pipeline/pipeline.go")
-	if err != nil {
-		t.Fatal(err)
+	var src []byte
+	for _, f := range []string{"../pipeline/pipeline.go", "../pipeline/media.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src = append(src, b...)
 	}
 	re := regexp.MustCompile(`errors\.New\("((?:[^"\\]|\\.)+)"\)`)
 	for _, m := range re.FindAllStringSubmatch(string(src), -1) {

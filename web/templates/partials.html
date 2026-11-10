@@ -1,33 +1,32 @@
 {{/* A strip of asset thumbnails bound to one reference list, with
      remove / make-primary actions and add-from-library / upload controls.
-     Params: P (project), Target, IDs, Label, Primary (bool), Back, Empty */}}
-{{define "refs"}}
+     Params: P (project), Target, IDs, Label, Primary (bool), Back, Empty,
+     Media ("image" by default, "video" or "audio") */}}
+{{define "refs"}}{{$media := "image"}}{{if .Media}}{{$media = .Media}}{{end}}
 <div class="refs">
   <div class="refs-head">
     <span class="label">{{t .Label}}</span>
-    <button type="button" class="btn small" data-pick data-action="/projects/{{.P.ID}}/refs" data-target="{{.Target}}" data-back="{{.Back}}">{{t "+ From library"}}</button>
+    <button type="button" class="btn small" data-pick data-action="/projects/{{.P.ID}}/refs" data-target="{{.Target}}" data-back="{{.Back}}" data-media="{{$media}}">{{t "+ From library"}}</button>
     <form method="post" action="/projects/{{.P.ID}}/upload" enctype="multipart/form-data" class="inline">
       <input type="hidden" name="target" value="{{.Target}}">
       <input type="hidden" name="back" value="{{.Back}}">
-      <label class="btn small">{{t "Upload"}}<input type="file" name="files" accept="image/*" multiple data-autosubmit hidden></label>
+      <label class="btn small">{{t "Upload"}}<input type="file" name="files" accept="{{$media}}/*" multiple data-autosubmit hidden></label>
     </form>
   </div>
   {{$ctx := .}}
   {{$primary := last .IDs}}
   {{if .IDs}}
-  <div class="thumbs">
+  <div class="thumbs media-{{$media}}">
     {{range .IDs}}{{with asset .}}
     <figure class="thumb {{if and $ctx.Primary (eq .ID $primary)}}primary{{end}}">
-      <a href="/assets/{{.ID}}/file" target="_blank" rel="noopener">
-        {{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}
-      </a>
+      {{template "media" .}}
       {{if and $ctx.Primary (eq .ID $primary)}}<span class="thumb-badge">{{t "in use"}}</span>{{end}}
       <figcaption>
         {{if and $ctx.Primary (ne .ID $primary)}}
         <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
           <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
           <input type="hidden" name="op" value="primary"><input type="hidden" name="back" value="{{$ctx.Back}}">
-          <button class="link" title="{{t "Use this image downstream"}}">{{t "use"}}</button>
+          <button class="link" title="{{t "Use this one downstream"}}">{{t "use"}}</button>
         </form>{{end}}
         <form method="post" action="/projects/{{$ctx.P.ID}}/refs" class="inline">
           <input type="hidden" name="target" value="{{$ctx.Target}}"><input type="hidden" name="asset_id" value="{{.ID}}">
@@ -42,6 +41,26 @@
 </div>
 {{end}}
 
+{{/* One asset shown according to its media type. Param: the asset. */}}
+{{define "media"}}
+{{- if eq .Media "video"}}<video src="/assets/{{.ID}}/file" controls preload="metadata" title="{{.Name}}"></video>
+{{- else if eq .Media "audio"}}<div class="audio-tile" title="{{.Name}}"><span class="audio-name">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</span><audio src="/assets/{{.ID}}/file" controls preload="none"></audio></div>
+{{- else}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>
+{{- end}}
+{{end}}
+
+{{/* A note about an unfinished provider job for an item, with a way to
+     drop it. Params: P, Stage, Target, Back */}}
+{{define "jobnote"}}{{with job .P .Stage .Target}}
+<span class="job-note">
+  <span title="{{.RequestID}} · {{.Model}}">{{t "An earlier request is unfinished. Generating again collects its result instead of starting over."}}</span>
+  <span class="muted">{{.When}}</span>
+  <form method="post" action="/projects/{{$.P.ID}}/jobs/discard" class="inline" data-confirm="{{t "Discard the unfinished request? Its result will be lost."}}">
+    <input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="link danger">{{t "discard"}}</button>
+  </form>
+</span>
+{{end}}{{end}}
+
 {{/* Provider/model options for a group of run buttons. Params: ID, Kind ("llm"|"image"), Stage */}}
 {{define "opts"}}
 <div class="run-opts" id="{{.ID}}" data-model-scope>
@@ -52,6 +71,13 @@
     </select>
   </label>
   <label>{{t "Model"}} {{template "modelfield" dict "Name" "model" "Value" $sm.Model "Placeholder" (t "model id")}}</label>
+  {{else if eq .Kind "video"}}{{$vc := videoCfg}}
+  <label>{{t "Provider"}}
+    <select name="provider" data-provider>
+      {{range providers "image"}}<option value="{{.Name}}" {{if eq .Name $vc.Provider}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </label>
+  <label>{{t "Model"}} {{template "modelfield" dict "Name" "model" "Value" "" "Placeholder" (printf "%s: %s" (t "auto") $vc.Model) "Category" "image-to-video"}}</label>
   {{else}}{{$ic := imageCfg}}
   <label>{{t "Provider"}}
     <select name="provider" data-provider>

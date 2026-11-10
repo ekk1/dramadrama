@@ -343,6 +343,36 @@ form.dirty .btn.primary:not(.danger)::after { background: var(--accent-text); }
 a.tag:hover { color: var(--accent); background: var(--accent-soft); text-decoration: none; }
 .tag.accent { background: var(--accent-soft); color: var(--accent); }
 
+/* Video and audio in thumbnail strips */
+.thumb video { border-radius: 10px; outline: 1px solid var(--border); outline-offset: -1px; background: #000; }
+.thumbs.media-video .thumb video { height: 280px; }
+.thumb.primary video { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thumbs.media-audio { flex-direction: column; gap: 8px; }
+.audio-tile { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 240px; }
+.audio-tile audio { width: 100%; height: 34px; }
+.audio-name { font-size: .8rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumbs.media-audio figcaption { justify-content: flex-start; }
+.thumbs.log-inputs .thumb img, .thumbs.log-inputs .thumb video { height: 96px; }
+.audio-pick { width: 100%; aspect-ratio: 3 / 4; display: grid; place-items: center; font-size: 2.4rem; color: var(--muted); border-radius: 10px; background: var(--surface-2); outline: 1px solid var(--border); outline-offset: -1px; }
+
+/* Step 7: clip output on the left, its inputs on the right */
+.clip-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.clip-grid > div > .refs:first-child, .clip-inputs > .refs:first-child, .clip-inputs > div:first-child > .refs { border-top: 0; padding-top: 0; margin-top: 4px; }
+.clip-inputs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 20px; align-content: start; }
+.clip-inputs > .refs:nth-child(n+3), .clip-inputs > div:nth-child(n+3) { grid-column: 1 / -1; }
+.clip-inputs > div:nth-child(2) > .refs { border-top: 0; padding-top: 0; margin-top: 4px; }
+.clip-inputs .thumb img { height: 110px; }
+.clip-inputs .thumbs.mini img { height: 110px; border-radius: 10px; }
+.clip-inputs .refs + .refs .thumbs.mini img, .clip-inputs > .refs:last-child .thumbs.mini img { height: 76px; border-radius: 6px; }
+.clip-inputs .refs-head { min-height: 30px; }
+.clip-inputs .thumbs.media-video .thumb video { height: 150px; }
+.next-frame { margin-top: 6px; }
+.job-note {
+  display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: .8rem; padding: 4px 10px; border-radius: 8px;
+  color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--surface));
+}
+.job-note .link { font-size: .8rem; }
+
 /* ---------------------------------------------------------------- projects list */
 .new-project { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, var(--surface)), var(--surface) 55%); }
 .new-project .grid-form { grid-template-columns: minmax(180px, 280px) 1fr; align-items: start; }
@@ -365,7 +395,7 @@ a.tag:hover { color: var(--accent); background: var(--accent-soft); text-decorat
 .pc-body strong { font-size: 1.02rem; line-height: 1.3; }
 .pc-body p { margin: 0; }
 .pc-idea { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: 1; }
-.pc-steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.pc-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
 .pc-steps i { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 10%, transparent); }
 .pc-steps i.partial { background: color-mix(in srgb, var(--accent) 45%, transparent); }
 .pc-steps i.done { background: var(--accent); }
@@ -389,6 +419,8 @@ details[open] > summary { margin-bottom: 10px; color: var(--text); }
 .asset-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
 .asset-thumb { display: block; overflow: hidden; background: var(--surface-2); }
 .asset-thumb img, .asset-thumb video { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; transition: transform .3s ease; }
+.asset-thumb video { background: #000; object-fit: contain; }
+.asset-thumb .audio-tile { border: 0; border-radius: 0; min-width: 0; padding: 16px 12px; }
 .asset-card:hover .asset-thumb img { transform: scale(1.03); }
 .asset-meta { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
 .asset-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -417,6 +449,10 @@ details[open] > summary { margin-bottom: 10px; color: var(--text); }
 .settings-table tr:last-child td { border-bottom: 0; }
 .settings-table td:first-child { font-weight: 500; white-space: nowrap; }
 .settings-table .model-cell { min-width: 280px; }
+
+.grid-form.provider-model { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); }
+.roles-table td:first-child { width: 190px; }
+.param-list { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 
 /* A model ID input with its "browse" button. */
 .model-field { display: flex; gap: 6px; align-items: stretch; }
@@ -524,7 +560,10 @@ dialog.modal:has(.modal-form) { width: min(620px, 94vw); }
   .shot-form { grid-template-columns: 1fr 1fr; }
   .shot-tools { flex-direction: row; gap: 14px; border-left: 0; padding-left: 0; justify-content: flex-end; }
   .kf-grid { grid-template-columns: 1fr; }
+  .clip-grid { grid-template-columns: 1fr; }
+  .thumbs.media-video .thumb video { height: 220px; }
   .modal-body { grid-template-columns: 1fr; }
+  .grid-form.provider-model { grid-template-columns: 1fr; }
   .cards { grid-template-columns: 1fr; }
   .thumb img, .thumb video { height: 132px; }
 }

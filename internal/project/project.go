@@ -25,7 +25,8 @@ const (
 	StageVisualImages  = "visual_images"  // 3b. concept image generation
 	StageStoryboard    = "storyboard"     // 4. storyboard overview (LLM)
 	StageShotPrompts   = "shot_prompts"   // 5. per-shot prompts (LLM)
-	StageKeyframes     = "keyframes"      // 6. final shot generation
+	StageKeyframes     = "keyframes"      // 6. keyframe generation
+	StageClips         = "clips"          // 7. video clip generation
 )
 
 // ErrNotFound is returned for unknown project IDs.
@@ -58,6 +59,24 @@ type Project struct {
 
 	// Status of the most recent run of each stage.
 	Runs map[string]*Run `json:"runs,omitempty"`
+	// Jobs are media requests a provider has accepted whose result has
+	// not been collected yet, keyed like Runs (stage:item). They let an
+	// interrupted run pick the result up later instead of generating, and
+	// paying, again.
+	Jobs map[string]*Job `json:"jobs,omitempty"`
+}
+
+// Job is a provider-side request in flight for one item.
+type Job struct {
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	RequestID   string `json:"request_id"`
+	StatusURL   string `json:"status_url"`
+	ResponseURL string `json:"response_url"`
+	// Fingerprint identifies what was asked for; a run only resumes a job
+	// whose request it would have sent itself.
+	Fingerprint string    `json:"fingerprint"`
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // VisualPrompt is one character / scene / prop design.
@@ -72,7 +91,7 @@ type VisualPrompt struct {
 }
 
 // Shot is one storyboard shot. Stage 4 fills the overview fields, stage 5
-// the prompts, stage 6 the keyframes. ClipID is reserved for video.
+// the prompts, stage 6 the keyframes, stage 7 the clips.
 type Shot struct {
 	ID         string   `json:"id"`
 	Number     int      `json:"number"`
@@ -85,11 +104,33 @@ type Shot struct {
 
 	StoryboardPrompt string `json:"storyboard_prompt,omitempty"`
 	KeyframePrompt   string `json:"keyframe_prompt,omitempty"`
-	MotionPrompt     string `json:"motion_prompt,omitempty"` // for future image-to-video
+	MotionPrompt     string `json:"motion_prompt,omitempty"` // prompt for the video model
 
 	ReferenceIDs []string `json:"reference_ids,omitempty"` // explicit conditioning images
 	KeyframeIDs  []string `json:"keyframe_ids,omitempty"`  // generated keyframes, newest last
-	ClipID       string   `json:"clip_id,omitempty"`       // reserved: generated video clip
+
+	// Video inputs and outputs. The clip's first frame is the keyframe in
+	// use; in each list the last element is the one in use.
+	EndFrameIDs []string `json:"end_frame_ids,omitempty"` // last-frame images
+	VideoRefIDs []string `json:"video_ref_ids,omitempty"` // reference videos (all are sent)
+	AudioRefIDs []string `json:"audio_ref_ids,omitempty"` // reference audio (all are sent)
+	ClipIDs     []string `json:"clip_ids,omitempty"`      // generated clips, newest last
+}
+
+// Keyframe returns the keyframe in use, or "".
+func (s *Shot) Keyframe() string { return lastID(s.KeyframeIDs) }
+
+// EndFrame returns the last-frame image in use, or "".
+func (s *Shot) EndFrame() string { return lastID(s.EndFrameIDs) }
+
+// Clip returns the clip in use, or "".
+func (s *Shot) Clip() string { return lastID(s.ClipIDs) }
+
+func lastID(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[len(ids)-1]
 }
 
 // Run records the latest execution of a stage (or stage+target).
@@ -146,9 +187,10 @@ func (p *Project) RemoveAssetRefs(id string) {
 	for i := range p.Shots {
 		p.Shots[i].ReferenceIDs = del(p.Shots[i].ReferenceIDs)
 		p.Shots[i].KeyframeIDs = del(p.Shots[i].KeyframeIDs)
-		if p.Shots[i].ClipID == id {
-			p.Shots[i].ClipID = ""
-		}
+		p.Shots[i].EndFrameIDs = del(p.Shots[i].EndFrameIDs)
+		p.Shots[i].VideoRefIDs = del(p.Shots[i].VideoRefIDs)
+		p.Shots[i].AudioRefIDs = del(p.Shots[i].AudioRefIDs)
+		p.Shots[i].ClipIDs = del(p.Shots[i].ClipIDs)
 	}
 }
 

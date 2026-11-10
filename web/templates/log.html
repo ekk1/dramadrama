@@ -21,8 +21,8 @@
     <pre class="log-text {{if .Code}}mono{{end}}">{{.Text}}</pre>
     {{end}}
     {{if $e.Inputs}}
-    <h4>{{t "Input images"}}</h4>
-    <div class="thumbs mini">{{range $e.Inputs}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
+    <h4>{{t "Input files"}}</h4>
+    <div class="thumbs log-inputs">{{range $e.Inputs}}{{with asset .}}<figure class="thumb">{{template "media" .}}</figure>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
     {{end}}
   </section>
   <section class="stage">
@@ -33,7 +33,7 @@
     {{else}}<p class="muted">{{t "No response was received."}}</p>{{end}}
     {{if $e.Outputs}}
     <h4>{{t "Output"}}</h4>
-    <div class="thumbs">{{range $e.Outputs}}{{with asset .}}<figure class="thumb"><a href="/assets/{{.ID}}/file" target="_blank" rel="noopener">{{if hasPref .MIME "video/"}}<video src="/assets/{{.ID}}/file" muted controls></video>{{else}}<img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy">{{end}}</a></figure>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
+    <div class="thumbs">{{range $e.Outputs}}{{with asset .}}<figure class="thumb">{{template "media" .}}</figure>{{else}}<span class="tag">{{.}}</span>{{end}}{{end}}</div>
     {{end}}
   </section>
 </div>

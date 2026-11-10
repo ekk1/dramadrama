@@ -14,11 +14,12 @@ import (
 
 	"github.com/ekk1/dramadrama/internal/catalog"
 	"github.com/ekk1/dramadrama/internal/config"
+	"github.com/ekk1/dramadrama/internal/imagegen"
 	"github.com/ekk1/dramadrama/internal/llm"
 )
 
 // Settings tabs.
-var settingsTabs = []string{"providers", "llm", "image"}
+var settingsTabs = []string{"providers", "llm", "image", "video"}
 
 // providerView is a provider prepared for display. The stored key is never
 // included.
@@ -41,6 +42,44 @@ type settingsView struct {
 	Stages map[string]config.StageModel
 	Image  config.ImageConfig
 	Extra  string
+	// Video tab.
+	Video        config.VideoConfig
+	VideoExtra   string
+	VideoMapping string
+	Roles        []roleView       // how the model's inputs are used
+	Others       []imagegen.Param // the model's remaining inputs
+	HasSchema    bool
+}
+
+// roleView shows which model field carries one input role.
+type roleView struct {
+	Label string // translation key
+	Field string // empty: the model has no such input
+	Note  string // type or accepted values
+}
+
+var roleLabels = map[string]string{
+	imagegen.RolePrompt: "Prompt", imagegen.RoleFirstFrame: "First frame", imagegen.RoleLastFrame: "Last frame",
+	imagegen.RoleRefImages: "Reference images", imagegen.RoleRefVideos: "Reference videos", imagegen.RoleRefAudios: "Reference audio",
+	imagegen.RoleDuration: "Duration", imagegen.RoleAspect: "Aspect ratio",
+}
+
+func paramNote(p imagegen.Param) string {
+	if len(p.Enum) > 0 {
+		return strings.Join(p.Enum, " / ")
+	}
+	note := p.Type
+	if p.Min != nil || p.Max != nil {
+		lo, hi := "", ""
+		if p.Min != nil {
+			lo = strconv.FormatFloat(*p.Min, 'g', -1, 64)
+		}
+		if p.Max != nil {
+			hi = strconv.FormatFloat(*p.Max, 'g', -1, 64)
+		}
+		note += " " + lo + "–" + hi
+	}
+	return note
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +114,36 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.MarshalIndent(c.Image.Extra, "", "  ")
 		v.Extra = string(b)
 	}
+	v.Video = c.Video
+	if len(c.Video.Extra) > 0 {
+		b, _ := json.MarshalIndent(c.Video.Extra, "", "  ")
+		v.VideoExtra = string(b)
+	}
+	if len(c.Video.Mapping) > 0 {
+		b, _ := json.MarshalIndent(c.Video.Mapping, "", "  ")
+		v.VideoMapping = string(b)
+	}
+	if v.Tab == "video" {
+		schema := s.models.Schema(c.Video.Provider, c.Video.Model)
+		v.HasSchema = schema != nil
+		roles := imagegen.ResolveRoles(schema, c.Video.Mapping)
+		used := map[string]bool{}
+		for _, role := range imagegen.Roles {
+			rv := roleView{Label: roleLabels[role]}
+			if p, ok := roles[role]; ok {
+				rv.Field, rv.Note = p.Name, paramNote(p)
+				used[p.Name] = true
+			}
+			v.Roles = append(v.Roles, rv)
+		}
+		if schema != nil {
+			for _, p := range schema.Params {
+				if !used[p.Name] {
+					v.Others = append(v.Others, p)
+				}
+			}
+		}
+	}
 	s.render(w, r, "settings", view{Title: "Settings", Nav: "settings", D: v})
 }
 
@@ -101,6 +170,9 @@ func renameProvider(c *config.Config, from, to string) {
 	}
 	if c.Image.Provider == from {
 		c.Image.Provider = to
+	}
+	if c.Video.Provider == from {
+		c.Video.Provider = to
 	}
 }
 
@@ -270,6 +342,51 @@ func (s *Server) handleSaveImage(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	settingsDone(w, r, "image", err)
+}
+
+// handleSaveVideo stores the video generation settings.
+func (s *Server) handleSaveVideo(w http.ResponseWriter, r *http.Request) {
+	err := s.cfg.Update(func(c *config.Config) error {
+		c.Video = config.VideoConfig{
+			Provider: r.FormValue("vid_provider"),
+			Model:    strings.TrimSpace(r.FormValue("vid_model")),
+		}
+		if ex := strings.TrimSpace(r.FormValue("vid_extra")); ex != "" {
+			if err := json.Unmarshal([]byte(ex), &c.Video.Extra); err != nil {
+				return fmt.Errorf("extra video parameters must be a JSON object: %v", err)
+			}
+		}
+		if mp := strings.TrimSpace(r.FormValue("vid_mapping")); mp != "" {
+			if err := json.Unmarshal([]byte(mp), &c.Video.Mapping); err != nil {
+				return fmt.Errorf("the input mapping must be a JSON object of strings: %v", err)
+			}
+		}
+		return nil
+	})
+	settingsDone(w, r, "video", err)
+}
+
+// handleFetchSchema downloads the input list of the configured video
+// model, so its inputs can be matched to roles.
+func (s *Server) handleFetchSchema(w http.ResponseWriter, r *http.Request) {
+	vc := s.cfg.Get().Video
+	p := s.cfg.Get().Provider(vc.Provider)
+	var err error
+	switch {
+	case p == nil:
+		err = errors.New("no video provider configured; set one in Settings")
+	case vc.Model == "":
+		err = errors.New("no video model configured; set one in Settings")
+	default:
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		var sc *imagegen.InputSchema
+		if sc, err = s.fetchSchema(ctx, p, vc.Model); err == nil {
+			sc.Model = vc.Model // the cache is keyed by the model that was asked for
+			err = s.models.SaveSchema(p.Name, sc)
+		}
+	}
+	settingsDone(w, r, "video", err)
 }
 
 // ---------------------------------------------------------------------------

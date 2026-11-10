@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,11 +61,20 @@ var falImageSize = map[string]string{
 	"1:1":  "square_hd",
 }
 
-// payload builds the model input. Different fal endpoints name their inputs
-// differently (image_size vs aspect_ratio, image_url vs image_urls); we send
-// the common variants and fal ignores fields a model does not declare.
-// Anything can be overridden through Request.Extra.
+// payload builds the model input.
 func (f *fal) payload(req *Request) map[string]any {
+	if req.Kind == KindVideo {
+		p, _ := videoPayload(req)
+		return p
+	}
+	return imagePayload(req)
+}
+
+// imagePayload builds an image model's input. Different fal endpoints
+// name their inputs differently (image_size vs aspect_ratio, image_url vs
+// image_urls); we send the common variants and fal ignores fields a model
+// does not declare. Anything can be overridden through Request.Extra.
+func imagePayload(req *Request) map[string]any {
 	p := map[string]any{"prompt": req.Prompt}
 	if req.NegativePrompt != "" {
 		p["negative_prompt"] = req.NegativePrompt
@@ -79,14 +92,7 @@ func (f *fal) payload(req *Request) map[string]any {
 		p["seed"] = *req.Seed
 	}
 	if len(req.References) > 0 {
-		urls := make([]string, 0, len(req.References))
-		for _, img := range req.References {
-			if img.URL != "" {
-				urls = append(urls, img.URL)
-			} else {
-				urls = append(urls, "data:"+img.MIME+";base64,"+base64.StdEncoding.EncodeToString(img.Data))
-			}
-		}
+		urls := fileURLs(req.References)
 		p["image_url"] = urls[0]
 		p["image_urls"] = urls
 	}
@@ -94,6 +100,111 @@ func (f *fal) payload(req *Request) map[string]any {
 		p[k] = v
 	}
 	return p
+}
+
+// fileURL returns the value sent for a file input: its public URL, or the
+// content inline as a base64 data URI, which fal accepts for any file
+// input.
+func fileURL(img Image) string {
+	if img.URL != "" {
+		return img.URL
+	}
+	return "data:" + img.MIME + ";base64," + base64.StdEncoding.EncodeToString(img.Data)
+}
+
+func fileURLs(list []Image) []string {
+	urls := make([]string, len(list))
+	for i, img := range list {
+		urls[i] = fileURL(img)
+	}
+	return urls
+}
+
+// roleNames are the display names used in Explain.
+var roleNames = map[string]string{
+	RoleFirstFrame: "first frame", RoleLastFrame: "last frame", RoleRefImages: "reference images",
+	RoleRefVideos: "reference videos", RoleRefAudios: "reference audio", RoleDuration: "duration", RoleAspect: "aspect ratio",
+}
+
+// videoPayload builds a video model's input by matching the request's
+// inputs to the model's fields (see ResolveRoles). The notes say what
+// went where and what could not be sent.
+func videoPayload(req *Request) (map[string]any, []string) {
+	roles := ResolveRoles(req.Schema, req.Mapping)
+	p := map[string]any{}
+	var notes []string
+	if req.Schema == nil {
+		notes = append(notes, "The model's parameter list is unknown: only the prompt and the first frame are sent.")
+	}
+	if pr, ok := roles[RolePrompt]; ok {
+		p[pr.Name] = req.Prompt
+	}
+	// files assigns a list of inputs to the field that plays a role.
+	files := func(role string, list []Image) {
+		if len(list) == 0 {
+			return
+		}
+		pr, ok := roles[role]
+		if !ok {
+			notes = append(notes, roleNames[role]+": not supported by this model, ignored")
+			return
+		}
+		note := roleNames[role] + " → " + pr.Name
+		if pr.Type == "array" {
+			p[pr.Name] = fileURLs(list)
+		} else {
+			p[pr.Name] = fileURL(list[0])
+			if len(list) > 1 {
+				note += fmt.Sprintf(" (only the first of %d)", len(list))
+			}
+		}
+		notes = append(notes, note)
+	}
+	one := func(img *Image) []Image {
+		if img == nil {
+			return nil
+		}
+		return []Image{*img}
+	}
+	files(RoleFirstFrame, one(req.FirstFrame))
+	files(RoleLastFrame, one(req.LastFrame))
+	files(RoleRefImages, req.References)
+	files(RoleRefVideos, req.RefVideos)
+	files(RoleRefAudios, req.RefAudios)
+
+	if req.Duration > 0 {
+		if pr, ok := roles[RoleDuration]; ok {
+			if v := durationValue(pr, req.Duration); v != nil {
+				p[pr.Name] = v
+				notes = append(notes, fmt.Sprintf("duration → %s = %v", pr.Name, v))
+			}
+		}
+	}
+	if req.AspectRatio != "" {
+		if pr, ok := roles[RoleAspect]; ok {
+			if len(pr.Enum) == 0 || slices.Contains(pr.Enum, req.AspectRatio) {
+				p[pr.Name] = req.AspectRatio
+			} else {
+				notes = append(notes, fmt.Sprintf("aspect ratio: %s is not offered by this model, its default is used", req.AspectRatio))
+			}
+		}
+	}
+	if req.Seed != nil {
+		p["seed"] = *req.Seed
+	}
+	for k, v := range req.Extra {
+		p[k] = v
+	}
+	return p, notes
+}
+
+// Explain implements Explainer.
+func (f *fal) Explain(req *Request) []string {
+	if req.Kind != KindVideo {
+		return nil
+	}
+	_, notes := videoPayload(req)
+	return notes
 }
 
 // DescribePayload implements PayloadDescriber.
@@ -131,7 +242,35 @@ func redactData(v any) any {
 	return v
 }
 
-func (f *fal) do(ctx context.Context, method, url string, body any, out any) error {
+// HTTPError is a non-2xx response from the provider.
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("fal: HTTP %d: %s", e.StatusCode, e.Body) }
+
+// Retryable reports whether err leaves the outcome of a job unknown, so
+// that waiting for it again later may still succeed: cancellation,
+// network failures, and overload or server errors. Any other error is the
+// provider's final word on the job.
+func Retryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var he *HTTPError
+	if errors.As(err, &he) {
+		return he.StatusCode >= 500 || he.StatusCode == http.StatusTooManyRequests
+	}
+	var ne net.Error
+	var ue *url.Error
+	return errors.As(err, &ne) || errors.As(err, &ue)
+}
+
+func (f *fal) do(ctx context.Context, method, target string, body any, out any) error {
 	var rd io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -140,7 +279,7 @@ func (f *fal) do(ctx context.Context, method, url string, body any, out any) err
 		}
 		rd = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rd)
+	req, err := http.NewRequestWithContext(ctx, method, target, rd)
 	if err != nil {
 		return err
 	}
@@ -167,7 +306,7 @@ func (f *fal) do(ctx context.Context, method, url string, body any, out any) err
 		if len(msg) > 2000 {
 			msg = msg[:2000] + "…"
 		}
-		return fmt.Errorf("fal: HTTP %d: %s", resp.StatusCode, msg)
+		return &HTTPError{StatusCode: resp.StatusCode, Body: msg}
 	}
 	if out == nil {
 		return nil
@@ -179,27 +318,56 @@ func (f *fal) do(ctx context.Context, method, url string, body any, out any) err
 	return json.Unmarshal(data, out)
 }
 
+// Generate submits a request and waits for its result.
 func (f *fal) Generate(ctx context.Context, req *Request) (*Result, error) {
+	job, err := f.Submit(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return f.Wait(ctx, job, nil)
+}
+
+// Submit implements Queued.
+func (f *fal) Submit(ctx context.Context, req *Request) (*Job, error) {
 	if req.Model == "" {
 		return nil, fmt.Errorf("fal: model is required")
 	}
-	var sub struct {
-		RequestID   string `json:"request_id"`
-		StatusURL   string `json:"status_url"`
-		ResponseURL string `json:"response_url"`
-	}
-	if err := f.do(ctx, http.MethodPost, f.baseURL+"/"+strings.Trim(req.Model, "/"), f.payload(req), &sub); err != nil {
+	var job Job
+	if err := f.do(ctx, http.MethodPost, f.baseURL+"/"+strings.Trim(req.Model, "/"), f.payload(req), &job); err != nil {
 		return nil, err
 	}
-	if sub.StatusURL == "" || sub.ResponseURL == "" {
+	if job.StatusURL == "" || job.ResponseURL == "" {
 		return nil, fmt.Errorf("fal: queue response missing status/response URL")
 	}
-	for {
+	return &job, nil
+}
+
+// Cancel implements Queued: PUT {status_url minus "/status"}/cancel.
+func (f *fal) Cancel(ctx context.Context, job *Job) error {
+	base, ok := strings.CutSuffix(job.StatusURL, "/status")
+	if !ok {
+		return fmt.Errorf("fal: cannot derive the cancel URL")
+	}
+	return f.do(ctx, http.MethodPut, base+"/cancel", nil, nil)
+}
+
+type falFile struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+}
+
+// Wait implements Queued.
+func (f *fal) Wait(ctx context.Context, job *Job, onStatus func(string)) (*Result, error) {
+	last := ""
+	for n := 0; ; n++ {
 		var st struct {
-			Status string `json:"status"`
-			Error  string `json:"error"`
+			Status   string `json:"status"`
+			Error    string `json:"error"`
+			Position *int   `json:"queue_position"`
 		}
-		if err := f.do(ctx, http.MethodGet, sub.StatusURL, nil, &st); err != nil {
+		if err := f.do(ctx, http.MethodGet, job.StatusURL, nil, &st); err != nil {
 			return nil, err
 		}
 		if st.Status == "COMPLETED" {
@@ -211,30 +379,34 @@ func (f *fal) Generate(ctx context.Context, req *Request) (*Result, error) {
 		if st.Status != "IN_QUEUE" && st.Status != "IN_PROGRESS" {
 			return nil, fmt.Errorf("fal: unexpected status %q %s", st.Status, st.Error)
 		}
+		if desc := st.Status; onStatus != nil {
+			if st.Status == "IN_QUEUE" && st.Position != nil {
+				desc = fmt.Sprintf("IN_QUEUE (position %d)", *st.Position)
+			}
+			if desc != last {
+				onStatus(desc)
+				last = desc
+			}
+		}
+		// Poll quickly at first (images take seconds), then back off for
+		// long jobs (video takes minutes).
+		wait := f.poll * time.Duration(min(1+n/15, 5))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(f.poll):
+		case <-time.After(wait):
 		}
 	}
 	var raw json.RawMessage
-	if err := f.do(ctx, http.MethodGet, sub.ResponseURL, nil, &raw); err != nil {
+	if err := f.do(ctx, http.MethodGet, job.ResponseURL, nil, &raw); err != nil {
 		return nil, err
 	}
 	var out struct {
-		Images []struct {
-			URL         string `json:"url"`
-			ContentType string `json:"content_type"`
-			Width       int    `json:"width"`
-			Height      int    `json:"height"`
-		} `json:"images"`
-		Image *struct {
-			URL         string `json:"url"`
-			ContentType string `json:"content_type"`
-			Width       int    `json:"width"`
-			Height      int    `json:"height"`
-		} `json:"image"`
-		Seed *int64 `json:"seed"`
+		Images []falFile `json:"images"`
+		Image  *falFile  `json:"image"`
+		Videos []falFile `json:"videos"`
+		Video  *falFile  `json:"video"`
+		Seed   *int64    `json:"seed"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("fal: decode result: %w", err)
@@ -242,26 +414,43 @@ func (f *fal) Generate(ctx context.Context, req *Request) (*Result, error) {
 	if out.Image != nil {
 		out.Images = append(out.Images, *out.Image)
 	}
-	if len(out.Images) == 0 {
-		return nil, fmt.Errorf("fal: result has no images: %s", truncate(string(raw), 500))
+	if out.Video != nil {
+		out.Videos = append(out.Videos, *out.Video)
 	}
-	res := &Result{Seed: out.Seed, RequestID: sub.RequestID, Raw: raw}
-	for _, im := range out.Images {
-		data, ct, err := f.fetch(ctx, im.URL)
-		if err != nil {
-			return nil, err
+	if len(out.Images) == 0 && len(out.Videos) == 0 {
+		return nil, fmt.Errorf("fal: result has no images or video: %s", truncate(string(raw), 500))
+	}
+	res := &Result{Seed: out.Seed, RequestID: job.RequestID, Raw: raw}
+	download := func(files []falFile) ([]Image, error) {
+		var list []Image
+		for _, im := range files {
+			data, ct, err := f.fetch(ctx, im.URL)
+			if err != nil {
+				return nil, err
+			}
+			if im.ContentType != "" {
+				ct = im.ContentType
+			}
+			list = append(list, Image{MIME: ct, Data: data, URL: im.URL, Width: im.Width, Height: im.Height})
 		}
-		if im.ContentType != "" {
-			ct = im.ContentType
-		}
-		res.Images = append(res.Images, Image{MIME: ct, Data: data, URL: im.URL, Width: im.Width, Height: im.Height})
+		return list, nil
+	}
+	var err error
+	if res.Images, err = download(out.Images); err != nil {
+		return nil, err
+	}
+	if res.Videos, err = download(out.Videos); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
 
-// fetch downloads an output image (https URL or data URI).
-func (f *fal) fetch(ctx context.Context, url string) ([]byte, string, error) {
-	if rest, ok := strings.CutPrefix(url, "data:"); ok {
+// maxDownload caps one output file; video clips can be large.
+const maxDownload = 512 << 20
+
+// fetch downloads an output file (https URL or data URI).
+func (f *fal) fetch(ctx context.Context, src string) ([]byte, string, error) {
+	if rest, ok := strings.CutPrefix(src, "data:"); ok {
 		meta, payload, ok := strings.Cut(rest, ",")
 		if !ok {
 			return nil, "", fmt.Errorf("fal: malformed data URI")
@@ -273,7 +462,7 @@ func (f *fal) fetch(ctx context.Context, url string) ([]byte, string, error) {
 		data, err := base64.StdEncoding.DecodeString(payload)
 		return data, mt, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -283,9 +472,9 @@ func (f *fal) fetch(ctx context.Context, url string) ([]byte, string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return nil, "", fmt.Errorf("fal: download %s: HTTP %d", url, resp.StatusCode)
+		return nil, "", &HTTPError{StatusCode: resp.StatusCode, Body: "download " + src}
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownload))
 	if err != nil {
 		return nil, "", err
 	}
