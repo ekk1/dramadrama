@@ -18,8 +18,8 @@ human-triggered pipeline (no node graphs, nothing runs automatically):
    optional last frame, reference images/videos/audio and the motion prompt
 
 **Status:** the full pipeline including video, the asset library, the web
-UI (zh/en), a request log and per-provider model lists exist. Nothing has been run
-against real provider APIs yet; all tests use fakes.
+UI (zh/en), a request log and per-provider model lists exist. Nothing has
+been run against real provider APIs yet; all tests use fakes.
 
 ## Working agreements with the owner
 
@@ -61,8 +61,9 @@ gofmt -l .
 ```
 
 Runtime data goes to `data/` (gitignored): config with API keys, projects,
-assets, prompt overrides, cached model lists, and the request log. Keys come from `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GEMINI_API_KEY` or `FAL_KEY`, or are stored via Settings.
+assets, prompt overrides, cached model lists and input schemas, and the
+request log. Keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY` or `FAL_KEY`, or are stored via Settings.
 
 ## Architecture
 
@@ -76,9 +77,11 @@ internal/imagegen  media generation (images and video, despite the name): Genera
 internal/assets    central asset library: index.json + files/<sha256><ext>
 internal/project   Project model + JSON store; Store.Update(id, fn) is the
                    only safe way to mutate (holds a lock across load/fn/save)
-internal/config    providers, per-stage models, image settings (file mode 0600)
-internal/catalog   model lists fetched from providers, cached one file per
-                   provider under data/models/; Fetch dispatches to llm/imagegen
+internal/config    providers, per-stage models, image and video settings
+                   (file mode 0600)
+internal/catalog   model lists and video-model input schemas fetched from
+                   providers, cached under data/models/; Fetch and FetchSchema
+                   dispatch to llm/imagegen
 internal/reqlog    request log: one JSON file per model request under
                    data/logs/<day>/; no index, the directory tree is the database
 internal/pipeline  stage implementations, Service.Run dispatch, prompt templates
@@ -129,9 +132,8 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
 - **Request log:**
   - Every model request is logged through `Service.writeLog`: LLM calls
     in `complete`, media generation in `generateImage` and
-    `generateClip`. A new kind of
-    request must be logged the same way, with a `callInfo` saying which
-    project, stage and item it is for.
+    `generateClip`. A new kind of request must be logged the same way,
+    saying which project, stage and item it is for.
   - Entries hold the full prompt and output. They must never contain API
     keys, and binary inputs are recorded as asset IDs. Generators expose
     the body they send through `imagegen.PayloadDescriber`, with data
@@ -231,14 +233,18 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
      `models.go`.
   2. Add its type constant, `Types` entry and `New` case.
   3. Add fake-server tests in `llm_test.go`.
-- **New image provider:** same pattern in `internal/imagegen`.
+- **New image or video provider:** same pattern in `internal/imagegen`.
+  Also implement `Queued` if requests can be collected later (that is
+  what makes them resumable), `PayloadDescriber` for the request log,
+  `Explainer` for video, and model listing in `models.go`.
 - **New stage:**
   1. Add a constant in `project`, a case in `Service.Run`, and a `run…`
      method.
   2. Add prompt templates if it's an LLM stage, plus `Prompts.Names()` and
      `config.LLMStages` entries.
   3. Add a UI section in `project.html` using the `opts`, `runbtn`,
-     `status` and `log` partials, and a step in `projectSteps`.
+     `status` and `log` partials, a step in `projectSteps`, and a display
+     name in `stageNames` (logs.go).
   4. Add translations for any new strings.
   5. Add pipeline and server tests.
 
