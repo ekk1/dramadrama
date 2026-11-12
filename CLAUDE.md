@@ -204,6 +204,14 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     or another form post reloads the page, so edits are never lost. Do
     not put `data-save` on forms whose post has side effects (add, delete,
     apply JSON).
+  - The project page is "live" (`data-live` on its content): `app.js`
+    sends form posts with fetch and merges the page the server answers
+    with into the current one (`apply`/`syncChildren`), and does the same
+    when a run ends or reports progress. Handlers stay plain
+    post-and-redirect, and without JS the page still works. The merge
+    pairs elements by `id`, then by position, so give list items (cards,
+    shots) an `id`. It never touches forms with unsaved edits, run logs
+    or a running run button (`keep`). Other pages still reload.
   - In JS read a form's URL with `form.getAttribute("action")`: shot
     forms have a field named `action` that shadows `form.action`.
   - The project page's step navigation comes from `projectSteps`

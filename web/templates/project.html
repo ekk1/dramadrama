@@ -5,7 +5,7 @@
   <p class="project-meta"><span class="tag accent">{{$p.AspectRatio}}</span><span>{{t "Updated"}} {{time $p.UpdatedAt}}</span><a href="/logs?project={{$p.ID}}">{{t "Request log"}}</a></p>
 </header>
 
-<div class="workbench {{arClass $p.AspectRatio}}">
+<div class="workbench {{arClass $p.AspectRatio}}" data-live>
 <nav class="stepper" aria-label="{{t "Steps"}}">
   {{range steps $p}}<a class="step {{.State}}" href="#s{{.Num}}"><span class="step-dot">{{.Num}}</span><span class="step-label">{{t .Label}}</span>{{if .Info}}<span class="step-info">{{.Info}}</span>{{end}}</a>
   {{end}}
