@@ -223,8 +223,12 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     when a run ends or reports progress. Handlers stay plain
     post-and-redirect, and without JS the page still works. The merge
     pairs elements by `id`, then by position, so give list items (cards,
-    shots) an `id`. It never touches forms with unsaved edits, run logs
-    or a running run button (`keep`). Other pages still reload.
+    shots) an `id`. It never touches forms with unsaved edits, run logs,
+    a running run button or an open dialog (`keep`), and leaves
+    `<details>` the user opened open. The asset library and the settings
+    page are live too. A successful post from a form in a dialog closes
+    the dialog; a failed one keeps it open and shows the error inside it.
+    Other pages (projects list, prompts, logs) still reload.
   - In JS read a form's URL with `form.getAttribute("action")`: shot
     forms have a field named `action` that shadows `form.action`.
   - The step navigation comes from `projectSteps` (server.go); update it

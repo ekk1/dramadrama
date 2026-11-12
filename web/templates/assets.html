@@ -37,7 +37,7 @@
 </section>
 
 <p class="muted small asset-count">{{len $d.Assets}} {{t "asset(s)"}}</p>
-<div class="asset-grid">
+<div class="asset-grid" data-live>
 {{range $d.Assets}}
   <article class="asset-card" id="a-{{.ID}}">
     <div class="asset-thumb media-{{.Media}}">{{template "media" .}}</div>

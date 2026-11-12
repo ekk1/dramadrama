@@ -798,3 +798,14 @@ func TestFollowRun(t *testing.T) {
 		t.Errorf("events after the run: %d", resp.StatusCode)
 	}
 }
+
+// The pages that app.js updates in place carry the marker it looks for.
+func TestLivePages(t *testing.T) {
+	h := newHarness(t)
+	pid := projectID(h.post("/projects", url.Values{"name": {"Demo"}, "idea": {"an idea"}}))
+	for _, path := range []string{"/projects/" + pid + "/step/1", "/assets", "/settings", "/settings?tab=llm"} {
+		if !strings.Contains(h.get(path), " data-live") {
+			t.Errorf("%s is not marked live", path)
+		}
+	}
+}

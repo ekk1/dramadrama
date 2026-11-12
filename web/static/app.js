@@ -2,7 +2,7 @@
 // server-rendered forms.
 //  - run buttons stream step output (Server-Sent Events over fetch)
 //  - asset picker dialog for attaching library assets
-//  - on live pages (the project page) form posts and finished runs update
+//  - on live pages (project steps, asset library, settings) form posts and finished runs update
 //    the page in place instead of reloading it; elsewhere the scroll
 //    position is kept across the reload
 //  - unsaved edits are marked, and saved automatically before a run or
@@ -70,8 +70,9 @@
   const live = !!(main && main.querySelector("[data-live]"));
 
   // Parts of the page that belong to the user or to a script, not to the
-  // server: forms with unsaved edits, run logs, and running run buttons.
-  function keep(el) { return el.matches("form.dirty, .run-log, form.running"); }
+  // server: forms with unsaved edits, run logs, running run buttons, and
+  // a dialog the user still has open.
+  function keep(el) { return el.matches("form.dirty, .run-log, form.running, dialog[open]"); }
 
   const ATOMIC = new Set(["INPUT", "TEXTAREA", "SELECT", "OPTION", "VIDEO", "AUDIO"]);
 
@@ -85,7 +86,10 @@
       old.replaceWith(document.importNode(fresh, true));
       return;
     }
-    for (const a of [...old.attributes]) if (!fresh.hasAttribute(a.name)) old.removeAttribute(a.name);
+    for (const a of [...old.attributes]) {
+      if (old.tagName === "DETAILS" && a.name === "open") continue; // opened by the user
+      if (!fresh.hasAttribute(a.name)) old.removeAttribute(a.name);
+    }
     for (const a of fresh.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
     syncChildren(old, fresh);
   }
@@ -148,6 +152,14 @@
     main.before(div);
   }
 
+  // A modal dialog covers the page, so an error about a form inside one is
+  // shown in the dialog, which stays open with what the user typed.
+  function flashInto(dlg) {
+    dlg.querySelectorAll(".flash").forEach((el) => el.remove());
+    const target = dlg.querySelector(".modal-body") || dlg;
+    document.querySelectorAll("body > .flash.error").forEach((el) => target.prepend(el));
+  }
+
   // Posts and refreshes run one after another, so the page always ends up
   // showing the newest state.
   let queue = Promise.resolve();
@@ -157,11 +169,21 @@
     return p;
   }
 
+  // here is the address of this page, without a message left in it by an
+  // earlier redirect.
+  function here() {
+    const q = new URLSearchParams(location.search);
+    q.delete("err");
+    q.delete("msg");
+    const qs = q.toString();
+    return location.pathname + (qs ? "?" + qs : "");
+  }
+
   // refresh re-reads the current page and merges it in.
   function refresh() {
     return queued(async () => {
       try {
-        const resp = await fetch(location.pathname + location.search, { headers: { Accept: "text/html" } });
+        const resp = await fetch(here(), { headers: { Accept: "text/html" } });
         if (resp.ok) apply(await resp.text());
       } catch { /* the next refresh will catch up */ }
     });
@@ -179,18 +201,22 @@
     return queued(async () => {
       const multipart = (form.getAttribute("enctype") || "").startsWith("multipart/");
       const fd = new FormData(form);
-      fd.set("back", location.pathname + location.search); // answer with this page
+      fd.set("back", here()); // answer with this page
+      const dlg = form.closest("dialog");
+      const inDialog = () => { if (dlg && dlg.open) flashInto(dlg); };
       let resp;
       try {
         // getAttribute: a field named "action" would shadow form.action.
         resp = await fetch(form.getAttribute("action"), { method: "POST", body: multipart ? fd : new URLSearchParams(fd) });
       } catch (err) {
         flashError(T("Failed: ") + err.message);
+        inDialog();
         return false;
       }
       const url = new URL(resp.url);
       if (!resp.ok) {
         flashError(T("Failed: ") + ((await resp.text()).trim() || resp.statusText));
+        inDialog();
         return false;
       }
       if (url.pathname !== location.pathname) { // e.g. the project was deleted
@@ -198,8 +224,14 @@
         return true;
       }
       const failed = url.searchParams.has("err");
-      if (!failed) form.classList.remove("dirty");
+      if (!failed) {
+        form.classList.remove("dirty");
+        if (dlg && dlg.open) dlg.close(); // done with it; let it be updated
+        // An "add" or upload form starts over, as it would after a reload.
+        if (!tracked(form)) form.reset();
+      }
       apply(await resp.text());
+      if (failed) inDialog();
       return !failed;
     });
   }
@@ -221,7 +253,6 @@
       submitter.disabled = false;
       submitter.textContent = label;
     }
-    if (form.querySelector("input[type=file]")) form.reset();
   }
 
   document.addEventListener("submit", (ev) => {
