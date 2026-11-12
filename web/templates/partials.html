@@ -91,7 +91,7 @@
 
 {{/* A button that runs a step. Params: P, Stage, Target, Label, Opts (options container id), Log (log element id), Primary, Missing (show only-missing box) */}}
 {{define "runbtn"}}
-<form method="post" action="/projects/{{.P.ID}}/run/{{.Stage}}" class="inline run-form" data-run data-opts="{{.Opts}}" data-log="{{.Log}}">
+<form method="post" action="/projects/{{.P.ID}}/run/{{.Stage}}" class="inline run-form" data-run data-key="{{runKey .Stage .Target}}" data-opts="{{.Opts}}" data-log="{{.Log}}">
   <input type="hidden" name="target" value="{{.Target}}">
   {{if .Missing}}<label class="check"><input type="checkbox" name="only_missing" value="1">{{t "only missing"}}</label>{{end}}
   <button class="btn {{if .Primary}}primary{{end}}">{{t .Label}}</button>
@@ -101,7 +101,7 @@
 {{/* Status of the last run. Params: P, Stage, Target */}}
 {{define "status"}}
 {{with run .P .Stage .Target}}
-<span class="status {{.Status}}" title="{{t .Error}}">
+<span class="status {{.Status}}" title="{{t .Error}}"{{if eq .Status "running"}} data-running="{{.Key}}"{{end}}>
   <span class="chip">{{if eq .Status "running"}}{{t "running…"}}{{else if eq .Status "done"}}{{t "done"}}{{else}}{{t "error"}}{{end}}</span>
   <span class="muted">{{.When}}{{if .Model}} · {{.Model}}{{end}}</span>
   {{if eq .Status "error"}}<span class="err-text">{{trunc (t .Error) 160}}</span>{{end}}

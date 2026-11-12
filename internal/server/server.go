@@ -59,6 +59,8 @@ type Server struct {
 	files       fs.FS
 	dev         bool
 
+	feeds feeds // runs in progress that pages can follow
+
 	mu    sync.Mutex
 	pages map[string]*template.Template
 	mux   *http.ServeMux
@@ -93,6 +95,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /projects", s.handleProjects)
 	m.HandleFunc("POST /projects", s.handleCreateProject)
 	m.HandleFunc("GET /projects/{id}", s.handleProject)
+	m.HandleFunc("GET /projects/{id}/step/{n}", s.handleStep)
+	m.HandleFunc("GET /projects/{id}/events", s.handleEvents)
 	m.HandleFunc("POST /projects/{id}/delete", s.handleDeleteProject)
 	m.HandleFunc("POST /projects/{id}/input", s.handleSaveInput)
 	m.HandleFunc("POST /projects/{id}/story", s.handleSaveStory)
@@ -292,6 +296,7 @@ func (s *Server) funcs() template.FuncMap {
 			return ids[len(ids)-1]
 		},
 		"steps":      projectSteps,
+		"runKey":     project.RunKey,
 		"initial":    initial,
 		"arClass":    func(ratio string) string { return "ar-" + strings.ReplaceAll(ratio, ":", "-") },
 		"t":          func(s string) string { return s }, // replaced per request in render
