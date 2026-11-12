@@ -289,6 +289,7 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return out
 		},
+		"list": func(ids ...string) []string { return ids },
 		"last": func(ids []string) string {
 			if len(ids) == 0 {
 				return ""

@@ -241,15 +241,22 @@
   async function submitForm(form, submitter) {
     if (!(await saveDirty(form))) return;
     if (!live) {
+      if (submitter && form.dataset.busy) {
+        submitter.disabled = true;
+        submitter.textContent = form.dataset.busy;
+      }
       form.classList.remove("dirty");
       saveScroll();
       form.submit();
       return;
     }
     const label = submitter ? submitter.textContent : "";
-    if (submitter) submitter.disabled = true;
+    if (submitter) {
+      submitter.disabled = true;
+      if (form.dataset.busy) submitter.textContent = form.dataset.busy; // slow posts: show progress
+    }
     await postLive(form);
-    if (submitter && submitter.isConnected) {
+    if (submitter) {
       submitter.disabled = false;
       submitter.textContent = label;
     }
@@ -273,14 +280,7 @@
       return;
     }
     ev.preventDefault();
-    const label = ev.submitter ? ev.submitter.textContent : "";
-    if (form.dataset.busy && ev.submitter) { // slow posts: show progress on the button
-      ev.submitter.disabled = true;
-      ev.submitter.textContent = form.dataset.busy;
-    }
-    submitForm(form, ev.submitter).then(() => {
-      if (live && ev.submitter) ev.submitter.textContent = label;
-    });
+    submitForm(form, ev.submitter);
   });
 
   document.addEventListener("change", (ev) => {

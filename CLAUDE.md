@@ -18,8 +18,10 @@ human-triggered pipeline (no node graphs, nothing runs automatically):
    optional last frame, reference images/videos/audio and the motion prompt
 
 **Status:** the full pipeline including video, the asset library, the web
-UI (zh/en), a request log and per-provider model lists exist. Nothing has
-been run against real provider APIs yet; all tests use fakes.
+UI (zh/en), a request log and per-provider model lists exist. The owner
+has run a project with real providers up to concept images (step 3b);
+keyframes and video have not been reported on. All tests use fakes, and
+no session has reached the provider APIs itself.
 
 ## Working agreements with the owner
 
@@ -84,11 +86,22 @@ internal/catalog   model lists and video-model input schemas fetched from
                    dispatch to llm/imagegen
 internal/reqlog    request log: one JSON file per model request under
                    data/logs/<day>/; no index, the directory tree is the database
-internal/pipeline  stage implementations, Service.Run dispatch, prompt templates
-                   (prompts/*.tmpl, overridable from data/prompts), JSON parsing;
-                   media.go: resumable provider jobs and the clips stage
-internal/server    handlers, i18n, SSE run endpoint, settings, prompt editor,
-                   request log pages
+internal/pipeline  stages and prompt templates (prompts/*.tmpl, overridable
+                   from data/prompts)
+                     pipeline.go  Service, Run dispatch, busy locks, forEach
+                     text.go      LLM calls (complete, projectText) and the
+                                  LLM stages 2, 3a, 4, 5
+                     images.go    generateImage and stages 3b, 6
+                     clips.go     generateClip and stage 7
+                     media.go     shared by images and clips: resumable jobs,
+                                  loadMedia, saveOutputs, logOutputs
+                     jsonx.go     tolerant JSON parsing; prompts.go templates
+internal/server    server.go    routes, render, template funcs, redirects
+                   handlers.go  projects, step pages, visuals, shots
+                   refs.go      reference lists and uploads
+                   runs.go      run, events, cancel; feed.go the run feeds
+                   library.go   asset library; logs.go request log pages
+                   settings.go  settings and prompt editor; i18n.go
 web/               embedded templates (layout, partials, pages) + static/app.{css,js}
 ```
 
@@ -175,7 +188,7 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   - Add every new key to the `zh` map in `internal/server/i18n.go`.
   - Messages that embed values need a regex in `zhPatterns`.
   - JS strings go in `jsKeys` and are read in JS with `T("…")`.
-  - New fixed `errors.New` messages in `pipeline.go` and `media.go` also
+  - New fixed `errors.New` messages anywhere in `internal/pipeline` also
     need a `zh` entry.
   - `TestTemplateKeysTranslated` and `TestPipelineErrorsTranslated`
     enforce all of this.
@@ -208,8 +221,8 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     `app.css`, with a dark set under `prefers-color-scheme: dark`. Use the
     tokens; do not hard-code colours.
   - Plain "edit and save" forms carry `data-save`. `app.js` marks them
-    dirty on input and posts dirty forms in the background before a run
-    or another form post reloads the page, so edits are never lost. Do
+    dirty on input and posts dirty forms in the background before a run,
+    another form post or a step link, so edits are never lost. Do
     not put `data-save` on forms whose post has side effects (add, delete,
     apply JSON).
   - A project has one page per step, `/projects/{id}/step/{n}`, all
@@ -264,7 +277,9 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   `Explainer` for video, and model listing in `models.go`.
 - **New stage:**
   1. Add a constant in `project`, a case in `Service.Run`, and a `run…`
-     method.
+     method. An LLM stage that reads the whole project uses
+     `projectText`; a per-item media stage uses `forEachMedia`, and
+     stores and logs its outputs with `saveOutputs` and `logOutputs`.
   2. Add prompt templates if it's an LLM stage, plus `Prompts.Names()` and
      `config.LLMStages` entries.
   3. Add a UI section in `project.html` (inside `{{if eq $step N}}`)
@@ -286,8 +301,24 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
 
 ## Known gaps / next candidates
 
-- Do a first run with real `ANTHROPIC_API_KEY` and `FAL_KEY`, and fix
-  anything that shows up.
+- Real runs past step 3b (keyframes, video) have not been reported on;
+  fix anything that shows up.
+- **Reference images have little effect** (reported by the owner, parked
+  for now; they suspect the models, which are mostly edit models):
+  - Step 3a sends the project's references but its prompt only asks for
+    the global style, and the images carry no names.
+  - Step 3b sends only an item's own "conditioning references", never
+    the project's style references, and the prompt stays a full
+    text-to-image description with nothing about what to keep from the
+    reference.
+  - A model typed into the run options replaces the automatic switch to
+    `RefModel`, and a text-to-image model ignores references silently.
+    Images that are not png/jpeg/webp/gif are skipped for LLMs without
+    a status line.
+  - Proposed, not agreed: send image names and let 3a describe what the
+    references show; let 3a say which references belong to which item
+    and attach them; prefix the prompt when references are attached;
+    report skipped references.
 - There is no CI. A GitHub Actions workflow running vet and race tests on
   PRs would help.
 - Verify against the live fal API: the model list, the per-model OpenAPI
@@ -301,6 +332,9 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
   there is no prompt or generation step for a dedicated end frame.
 - `fal-ai/flux-pro/kontext` takes a single image, so with several
   references only the first is used. Consider a multi-reference default.
+- The projects list, prompts and logs pages still reload on every post.
+  The prompts page's "reset to default" button uses `formaction`, which
+  the in-place post does not handle.
 - There is no auth. It's needed before exposing the server beyond
   localhost.
 - The `Host` header is not validated, so a DNS-rebinding page could drive

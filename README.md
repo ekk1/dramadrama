@@ -7,6 +7,11 @@ asset library.
 
 Written in Go using only the standard library (no third-party modules).
 
+Each step of a project has its own page. Pages update in place: saving,
+adding a reference or a finished run changes only the part of the page it
+affects. A run keeps going on the server when you move to another step or
+close the page; coming back shows its log from the start.
+
 ## Pipeline
 
 | # | Step | Backend | Output |
@@ -97,21 +102,28 @@ data/
 cmd/dramadrama     entry point
 internal/llm       provider-neutral LLM client: Chat + Stream (iter.Seq2)
                    openai_chat, openai_responses, anthropic, gemini; shared SSE reader
-internal/imagegen  image generation interface; fal.ai queue API client
+internal/imagegen  image and video generation interface; fal.ai queue API client;
+                   matching of request inputs to a model's fields
 internal/assets    asset library
 internal/project   project model and JSON store
 internal/config    configuration
-internal/catalog   cached provider model lists
+internal/catalog   cached provider model lists and video-model input lists
 internal/reqlog    request log (one JSON file per model request)
 internal/pipeline  stage implementations and prompt templates (pipeline/prompts/*.tmpl)
+                   pipeline.go  running a step     text.go    LLM steps
+                   images.go    image steps        clips.go   video step
+                   media.go     what image and video generation share
 internal/server    HTTP handlers (html/template, SSE for streaming runs)
+                   handlers.go  projects and steps refs.go    reference lists, uploads
+                   runs.go, feed.go  running steps library.go asset library
+                   settings.go, logs.go, i18n.go
 web/               templates, CSS and JS (embedded into the binary)
 ```
 
 ### Adding a provider
 
 - **LLM:** implement `llm.Client` (`Chat`, `Stream`) in `internal/llm` and register its type in `llm.New` and `llm.Types`.
-- **Image:** implement `imagegen.Generator` and register it in `imagegen.New` and `imagegen.Types`.
+- **Image or video:** implement `imagegen.Generator` and register it in `imagegen.New` and `imagegen.Types`. Implement `imagegen.Queued` as well if requests can be collected later; that is what lets an interrupted request be picked up again.
 
 Providers then become selectable in Settings.
 
@@ -136,7 +148,7 @@ clips; large reference videos make the request heavy.
 ## Tests
 
 ```bash
-go test ./...
+go test -race ./...
 ```
 
 The LLM and fal clients are tested against local fake HTTP servers. The

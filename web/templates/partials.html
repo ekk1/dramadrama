@@ -41,6 +41,9 @@
 </div>
 {{end}}
 
+{{/* A row of small image thumbnails that open the full image. Param: asset IDs. */}}
+{{define "minis"}}<div class="thumbs mini">{{range .}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{end}}{{end}}</div>{{end}}
+
 {{/* One asset shown according to its media type. Param: the asset. */}}
 {{define "media"}}
 {{- if eq .Media "video"}}<video src="/assets/{{.ID}}/file" controls preload="metadata" title="{{.Name}}"></video>

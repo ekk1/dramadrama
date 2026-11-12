@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -72,8 +73,15 @@ func TestTemplateKeysTranslated(t *testing.T) {
 // TestPipelineErrorsTranslated checks the fixed error messages of the
 // pipeline, which are shown in the UI.
 func TestPipelineErrorsTranslated(t *testing.T) {
+	files, _ := filepath.Glob("../pipeline/*.go")
+	if len(files) == 0 {
+		t.Fatal("pipeline sources not found")
+	}
 	var src []byte
-	for _, f := range []string{"../pipeline/pipeline.go", "../pipeline/media.go"} {
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
