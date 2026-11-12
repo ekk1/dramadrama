@@ -240,7 +240,7 @@
             {{$ids := index $refs "IDs"}}
             {{if $ids}}
             <div class="auto-refs"><span class="muted small">{{t "Auto-selected from concept images (add references to override):"}}</span>
-              <div class="thumbs mini">{{range $ids}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{end}}{{end}}</div>
+              {{template "minis" $ids}}
             </div>
             {{else}}<p class="muted small">{{t "No matching concept images: text-to-image model is used."}}</p>{{end}}
           {{end}}
@@ -283,7 +283,7 @@
         <div class="clip-inputs">
           <div class="refs">
             <div class="refs-head"><span class="label">{{t "First frame"}}</span></div>
-            {{with asset .Keyframe}}<div class="thumbs mini"><a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a></div>
+            {{if asset .Keyframe}}{{template "minis" (list .Keyframe)}}
             {{else}}<p class="muted small">{{t "No keyframe: run step 6, or the clip is generated from the prompt and references alone."}}</p>{{end}}
           </div>
           <div>
@@ -301,7 +301,7 @@
           {{$ids := index $refs "IDs"}}{{if $ids}}
           <div class="refs">
             <div class="refs-head"><span class="label">{{t "Reference images"}}</span><span class="muted small">{{t "same as the keyframe's (step 6)"}}</span></div>
-            <div class="thumbs mini">{{range $ids}}{{with asset .}}<a href="/assets/{{.ID}}/file" target="_blank" rel="noopener" title="{{.Name}}"><img src="/assets/{{.ID}}/file" alt="{{.Name}}" loading="lazy"></a>{{end}}{{end}}</div>
+            {{template "minis" $ids}}
           </div>
           {{end}}
         </div>

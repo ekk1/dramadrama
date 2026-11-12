@@ -529,6 +529,8 @@ var zh = map[string]string{
 
 	// Pipeline messages
 	"this step is already running":                                                          "该步骤已在运行",
+	"no JSON object found in model output":                                                  "模型输出中没有找到 JSON 对象",
+	"no prompt override directory configured":                                               "未配置提示词覆盖目录",
 	"enter a core idea first":                                                               "请先填写核心创意",
 	"the story is empty: run idea expansion or write the story first":                       "故事为空：请先运行构思扩写或手动填写故事",
 	"no provider/model configured for this step; set one in Settings or in the run options": "该步骤未配置服务商/模型；请在设置或运行选项中指定",
