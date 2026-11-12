@@ -2,7 +2,9 @@
 // server-rendered forms.
 //  - run buttons stream step output (Server-Sent Events over fetch)
 //  - asset picker dialog for attaching library assets
-//  - scroll position kept across form posts / reloads
+//  - on live pages (the project page) form posts and finished runs update
+//    the page in place instead of reloading it; elsewhere the scroll
+//    position is kept across the reload
 //  - unsaved edits are marked, and saved automatically before a run or
 //    another form post would reload the page and lose them
 //  - step navigation highlights the section in view
@@ -59,12 +61,168 @@
     return true;
   }
 
-  // submitForm saves other dirty forms, then submits `form` natively.
-  async function submitForm(form) {
+  // ---------------------------------------------------------------- live pages
+  // A page whose content carries [data-live] is updated in place: a form
+  // post is sent with fetch, and the page the server answers with is merged
+  // into the current one. Only what changed is touched, so the scroll
+  // position, playing videos, open run logs and unsaved edits all survive.
+  const main = document.querySelector("main");
+  const live = !!(main && main.querySelector("[data-live]"));
+  let afterSync = () => {};
+
+  // Parts of the page that belong to the user or to a script, not to the
+  // server: forms with unsaved edits, run logs, and running run buttons.
+  function keep(el) { return el.matches("form.dirty, .run-log, form.running"); }
+
+  const ATOMIC = new Set(["INPUT", "TEXTAREA", "SELECT", "OPTION", "VIDEO", "AUDIO"]);
+
+  function syncNode(old, fresh) {
+    if (old.nodeType !== 1) {
+      if (old.nodeValue !== fresh.nodeValue) old.nodeValue = fresh.nodeValue;
+      return;
+    }
+    if (keep(old) || old.isEqualNode(fresh)) return;
+    if (ATOMIC.has(old.tagName)) { // a new element also takes the new value
+      old.replaceWith(document.importNode(fresh, true));
+      return;
+    }
+    for (const a of [...old.attributes]) if (!fresh.hasAttribute(a.name)) old.removeAttribute(a.name);
+    for (const a of fresh.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
+    syncChildren(old, fresh);
+  }
+
+  // Two nodes are the same item if they have the same id; nodes without
+  // one are paired by position when they are the same kind of node.
+  function samePlace(old, fresh) {
+    if (old.nodeType !== fresh.nodeType) return false;
+    if (old.nodeType !== 1) return true;
+    if (old.id || fresh.id) return false; // ids are paired by lookup
+    if (old.tagName !== fresh.tagName) return false;
+    return old.tagName !== "FORM" || old.getAttribute("action") === fresh.getAttribute("action");
+  }
+
+  function syncChildren(old, fresh) {
+    const byId = new Map();
+    for (const c of old.children) if (c.id) byId.set(c.id, c);
+    let cur = old.firstChild;
+    for (const n of [...fresh.childNodes]) {
+      let match = null;
+      if (n.nodeType === 1 && n.id) match = byId.get(n.id) || null;
+      else if (cur && samePlace(cur, n)) match = cur;
+      if (!match) {
+        old.insertBefore(document.importNode(n, true), cur);
+        continue;
+      }
+      if (match === cur) cur = cur.nextSibling;
+      else old.insertBefore(match, cur);
+      syncNode(match, n);
+    }
+    while (cur) {
+      const next = cur.nextSibling;
+      cur.remove();
+      cur = next;
+    }
+  }
+
+  // apply merges a page fetched from the server into the current one.
+  function apply(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const fresh = doc.querySelector("main");
+    if (!fresh) return;
+    document.querySelectorAll("body > .flash").forEach((el) => el.remove());
+    doc.querySelectorAll("body > .flash").forEach((el) => main.before(document.importNode(el, true)));
+    syncChildren(main, fresh);
+    if (doc.title) document.title = doc.title;
+    afterSync();
+  }
+
+  function flashError(text) {
+    document.querySelectorAll("body > .flash").forEach((el) => el.remove());
+    const div = document.createElement("div");
+    div.className = "flash error";
+    div.setAttribute("role", "alert");
+    div.textContent = text;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "flash-close";
+    close.textContent = "×";
+    div.appendChild(close);
+    main.before(div);
+  }
+
+  // Posts and refreshes run one after another, so the page always ends up
+  // showing the newest state.
+  let queue = Promise.resolve();
+  function queued(fn) {
+    const p = queue.then(fn);
+    queue = p.catch(() => {});
+    return p;
+  }
+
+  // refresh re-reads the current page and merges it in.
+  function refresh() {
+    return queued(async () => {
+      try {
+        const resp = await fetch(location.pathname + location.search, { headers: { Accept: "text/html" } });
+        if (resp.ok) apply(await resp.text());
+      } catch { /* the next refresh will catch up */ }
+    });
+  }
+
+  let refreshTimer = null;
+  function refreshSoon() {
+    if (!live || refreshTimer) return;
+    refreshTimer = setTimeout(() => { refreshTimer = null; refresh(); }, 1500);
+  }
+
+  // postLive sends a form in the background and merges the answer. It
+  // resolves to false if the post failed.
+  function postLive(form) {
+    return queued(async () => {
+      const multipart = (form.getAttribute("enctype") || "").startsWith("multipart/");
+      const fd = new FormData(form);
+      let resp;
+      try {
+        // getAttribute: a field named "action" would shadow form.action.
+        resp = await fetch(form.getAttribute("action"), { method: "POST", body: multipart ? fd : new URLSearchParams(fd) });
+      } catch (err) {
+        flashError(T("Failed: ") + err.message);
+        return false;
+      }
+      const url = new URL(resp.url);
+      if (!resp.ok) {
+        flashError(T("Failed: ") + ((await resp.text()).trim() || resp.statusText));
+        return false;
+      }
+      if (url.pathname !== location.pathname) { // e.g. the project was deleted
+        location.href = url.href;
+        return true;
+      }
+      const failed = url.searchParams.has("err");
+      if (!failed) form.classList.remove("dirty");
+      apply(await resp.text());
+      return !failed;
+    });
+  }
+
+  // submitForm saves other dirty forms, then submits `form`: in place on a
+  // live page, natively (with a reload) elsewhere.
+  async function submitForm(form, submitter) {
     if (!(await saveDirty(form))) return;
-    form.classList.remove("dirty");
-    saveScroll();
-    form.submit();
+    if (!live) {
+      form.classList.remove("dirty");
+      saveScroll();
+      form.submit();
+      return;
+    }
+    const label = submitter ? submitter.textContent : "";
+    if (submitter) submitter.disabled = true;
+    await postLive(form);
+    if (submitter && submitter.isConnected) {
+      submitter.disabled = false;
+      submitter.textContent = label;
+    }
+    if (form.querySelector("input[type=file]")) form.reset();
   }
 
   document.addEventListener("submit", (ev) => {
@@ -85,11 +243,14 @@
       return;
     }
     ev.preventDefault();
+    const label = ev.submitter ? ev.submitter.textContent : "";
     if (form.dataset.busy && ev.submitter) { // slow posts: show progress on the button
       ev.submitter.disabled = true;
       ev.submitter.textContent = form.dataset.busy;
     }
-    submitForm(form);
+    submitForm(form, ev.submitter).then(() => {
+      if (live && ev.submitter) ev.submitter.textContent = label;
+    });
   });
 
   document.addEventListener("change", (ev) => {
@@ -131,29 +292,6 @@
     pre.scrollTop = pre.scrollHeight;
   }
 
-  // Persist the log across the reload that follows a run.
-  function persistLog(id, log, stateText, failed) {
-    store.set("runlog:" + location.pathname + ":" + id, JSON.stringify({ html: log.pre.innerHTML, state: stateText, failed }));
-  }
-
-  function restoreLogs() {
-    document.querySelectorAll(".run-log").forEach((box) => {
-      const key = "runlog:" + location.pathname + ":" + box.id;
-      const raw = store.get(key);
-      if (!raw) return;
-      store.del(key);
-      try {
-        const saved = JSON.parse(raw);
-        const log = logParts(box.id);
-        log.pre.innerHTML = saved.html;
-        log.state.textContent = saved.state;
-        box.hidden = false;
-        if (saved.failed) box.scrollIntoView({ block: "center" });
-      } catch { /* ignore */ }
-    });
-  }
-  restoreLogs();
-
   document.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".run-log-close");
     if (btn) btn.closest(".run-log").hidden = true;
@@ -162,13 +300,13 @@
   let activeRuns = 0;
   window.addEventListener("beforeunload", (ev) => {
     if (activeRuns > 0) {
-      // The step keeps running on the server, but warn anyway.
+      // The step keeps running on the server, but its log is lost.
       ev.preventDefault();
     }
   });
 
   async function runStep(form) {
-    if (!(await saveDirty())) return; // the run reads saved data, and reloads the page
+    if (!(await saveDirty())) return; // the run reads saved data
     const fd = new FormData(form);
     const optsId = form.dataset.opts;
     if (optsId) {
@@ -187,6 +325,7 @@
     const label = button.textContent;
     button.disabled = true;
     button.textContent = T("Running…");
+    form.classList.add("running");
     if (log) {
       log.box.hidden = false;
       log.box.classList.add("running");
@@ -235,7 +374,10 @@
           switch (event) {
             case "key": runKey = text; break;
             case "delta": append(log.pre, text); break;
-            case "status": append(log.pre, "\n› " + text + "\n", "st"); break;
+            case "status":
+              append(log.pre, "\n› " + text + "\n", "st");
+              refreshSoon(); // show results of a long run as they arrive
+              break;
             case "error":
               failed = true;
               stateText = T("Failed: ") + text;
@@ -252,9 +394,21 @@
     } finally {
       activeRuns--;
     }
-    if (log) persistLog(logId, log, stateText || (label + ": " + T("finished")), failed);
-    saveScroll();
-    location.reload();
+    form.classList.remove("running");
+    button.disabled = false;
+    button.textContent = label;
+    if (log) {
+      log.box.classList.remove("running");
+      log.box.classList.toggle("failed", failed);
+      log.stop.hidden = true;
+      log.state.textContent = stateText || (label + ": " + T("finished"));
+    }
+    if (live) {
+      await refresh();
+    } else {
+      saveScroll();
+      location.reload();
+    }
   }
 
   // ---------------------------------------------------------------- dialogs
@@ -392,6 +546,7 @@
       mark();
     }, { rootMargin: "-25% 0px -55% 0px" });
     steps.forEach((a) => { const sec = document.getElementById(a.hash.slice(1)); if (sec) io.observe(sec); });
+    afterSync = mark; // merging a page resets the classes
   }
 
   // ---------------------------------------------------------------- picker
@@ -455,7 +610,7 @@
       }
       document.body.appendChild(form);
       picker.close();
-      submitForm(form);
+      submitForm(form).then(() => { if (live) form.remove(); });
     }
 
     document.addEventListener("click", (ev) => {

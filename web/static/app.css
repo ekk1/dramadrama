@@ -567,3 +567,4 @@ dialog.modal:has(.modal-form) { width: min(620px, 94vw); }
   .cards { grid-template-columns: 1fr; }
   .thumb img, .thumb video { height: 132px; }
 }
+.run-log.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
