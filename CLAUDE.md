@@ -116,8 +116,16 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     - records `Project.Runs[key]`.
   - The run handler streams `key`, `delta`, `status`, `error` and `done`
     SSE events.
-  - Runs are detached from the HTTP request (`context.WithoutCancel`), so
-    closing the page doesn't stop them; the page has a stop button instead.
+  - Runs are detached from the HTTP request: `handleRun` starts the run
+    in a goroutine that publishes its events to a `runFeed` (feed.go) and
+    then follows that feed like any other reader. Closing or leaving the
+    page doesn't stop a run; the page has a stop button instead.
+  - A page follows the runs it finds in progress when it loads
+    (`resumeRuns` in `app.js`, `GET /projects/{id}/events?key=`), from
+    their first event. The `status` partial marks a running step with
+    `data-running` and the `runbtn` partial carries the same key in
+    `data-key`. A run request for a step that is already running follows
+    that run instead of failing.
 - **Media jobs are resumable** (`Service.runJob`, used for images and
   video):
   - The provider's job handle is saved in `Project.Jobs[stage:item]` as
@@ -204,7 +212,12 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     or another form post reloads the page, so edits are never lost. Do
     not put `data-save` on forms whose post has side effects (add, delete,
     apply JSON).
-  - The project page is "live" (`data-live` on its content): `app.js`
+  - A project has one page per step, `/projects/{id}/step/{n}`, all
+    rendered from `project.html` (`projectView.Step` picks the section).
+    `/projects/{id}` redirects to the furthest step that has content.
+    Forms send the page they are on as `back`; the handlers' default
+    redirect is the step the form belongs to.
+  - The step pages are "live" (`data-live` on their content): `app.js`
     sends form posts with fetch and merges the page the server answers
     with into the current one (`apply`/`syncChildren`), and does the same
     when a run ends or reports progress. Handlers stay plain
@@ -214,8 +227,8 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
     or a running run button (`keep`). Other pages still reload.
   - In JS read a form's URL with `form.getAttribute("action")`: shot
     forms have a field named `action` that shadows `form.action`.
-  - The project page's step navigation comes from `projectSteps`
-    (server.go); update it when adding a stage.
+  - The step navigation comes from `projectSteps` (server.go); update it
+    when adding a stage.
   - Uploads must go through `saveUploads`, which caps the request body
     before any form value is read.
 - **Video requests are described by role, not by field name.**
@@ -250,9 +263,9 @@ web/               embedded templates (layout, partials, pages) + static/app.{cs
      method.
   2. Add prompt templates if it's an LLM stage, plus `Prompts.Names()` and
      `config.LLMStages` entries.
-  3. Add a UI section in `project.html` using the `opts`, `runbtn`,
-     `status` and `log` partials, a step in `projectSteps`, and a display
-     name in `stageNames` (logs.go).
+  3. Add a UI section in `project.html` (inside `{{if eq $step N}}`)
+     using the `opts`, `runbtn`, `status` and `log` partials, a step in
+     `projectSteps`, and a display name in `stageNames` (logs.go).
   4. Add translations for any new strings.
   5. Add pipeline and server tests.
 

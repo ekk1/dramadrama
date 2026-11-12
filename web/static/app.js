@@ -7,7 +7,7 @@
 //    position is kept across the reload
 //  - unsaved edits are marked, and saved automatically before a run or
 //    another form post would reload the page and lose them
-//  - step navigation highlights the section in view
+//  - a page picks up the runs it finds in progress when it loads
 //  - confirm prompts, auto-submit uploads, dismissible flash messages
 "use strict";
 
@@ -68,7 +68,6 @@
   // position, playing videos, open run logs and unsaved edits all survive.
   const main = document.querySelector("main");
   const live = !!(main && main.querySelector("[data-live]"));
-  let afterSync = () => {};
 
   // Parts of the page that belong to the user or to a script, not to the
   // server: forms with unsaved edits, run logs, and running run buttons.
@@ -133,7 +132,6 @@
     doc.querySelectorAll("body > .flash").forEach((el) => main.before(document.importNode(el, true)));
     syncChildren(main, fresh);
     if (doc.title) document.title = doc.title;
-    afterSync();
   }
 
   function flashError(text) {
@@ -181,6 +179,7 @@
     return queued(async () => {
       const multipart = (form.getAttribute("enctype") || "").startsWith("multipart/");
       const fd = new FormData(form);
+      fd.set("back", location.pathname + location.search); // answer with this page
       let resp;
       try {
         // getAttribute: a field named "action" would shadow form.action.
@@ -233,7 +232,7 @@
     }
     if (form.hasAttribute("data-run")) {
       ev.preventDefault();
-      runStep(form);
+      startRun(form);
       return;
     }
     if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
@@ -297,15 +296,8 @@
     if (btn) btn.closest(".run-log").hidden = true;
   });
 
-  let activeRuns = 0;
-  window.addEventListener("beforeunload", (ev) => {
-    if (activeRuns > 0) {
-      // The step keeps running on the server, but its log is lost.
-      ev.preventDefault();
-    }
-  });
-
-  async function runStep(form) {
+  // startRun posts a run form; the answer is the run's event stream.
+  async function startRun(form) {
     if (!(await saveDirty())) return; // the run reads saved data
     const fd = new FormData(form);
     const optsId = form.dataset.opts;
@@ -319,6 +311,25 @@
         });
       }
     }
+    await followRun(form, () => fetch(form.getAttribute("action"), { method: "POST", body: new URLSearchParams(fd) }));
+  }
+
+  // The runs this page found in progress when it loaded keep going on the
+  // server; follow them from their first event.
+  function resumeRuns() {
+    const base = (location.pathname.match(/^\/projects\/[^/]+/) || [])[0];
+    if (!base) return;
+    const keys = new Set([...document.querySelectorAll("[data-running]")].map((el) => el.dataset.running));
+    document.querySelectorAll("form[data-run]").forEach((form) => {
+      if (!keys.has(form.dataset.key)) return;
+      followRun(form, () => fetch(base + "/events?key=" + encodeURIComponent(form.dataset.key)), true);
+    });
+  }
+
+  // followRun shows a run's event stream in the form's log until it ends.
+  // With `resumed` a missing stream is not an error: the run has just ended.
+  async function followRun(form, open, resumed) {
+    if (form.classList.contains("running")) return;
     const logId = form.dataset.log;
     const log = logParts(logId);
     const button = form.querySelector("button");
@@ -328,20 +339,20 @@
     form.classList.add("running");
     if (log) {
       log.box.hidden = false;
+      log.box.classList.remove("failed");
       log.box.classList.add("running");
       log.pre.textContent = "";
       log.state.textContent = label + "…";
-      log.box.scrollIntoView({ block: "nearest" });
+      if (!resumed) log.box.scrollIntoView({ block: "nearest" });
     }
 
-    let runKey = "";
+    let runKey = form.dataset.key || "";
     let failed = false;
     let stateText = "";
-    activeRuns++;
     const onStop = async () => {
       if (!runKey) return;
       const body = new URLSearchParams({ key: runKey });
-      await fetch(form.action.replace(/\/run\/[^/]+$/, "/cancel"), { method: "POST", body, redirect: "manual" });
+      await fetch(form.getAttribute("action").replace(/\/run\/[^/]+$/, "/cancel"), { method: "POST", body, redirect: "manual" });
     };
     if (log) {
       log.stop.hidden = false;
@@ -349,41 +360,45 @@
     }
 
     try {
-      const resp = await fetch(form.action, { method: "POST", body: new URLSearchParams(fd) });
-      if (!resp.ok || !resp.body) throw new Error((await resp.text()) || resp.statusText);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n\n")) >= 0) {
-          const chunk = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          let event = "message";
-          const data = [];
-          for (const line of chunk.split("\n")) {
-            if (line.startsWith("event:")) event = line.slice(6).trim();
-            else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-          }
-          let text = "";
-          try { text = JSON.parse(data.join("\n")); } catch { text = data.join("\n"); }
-          if (!log) continue;
-          switch (event) {
-            case "key": runKey = text; break;
-            case "delta": append(log.pre, text); break;
-            case "status":
-              append(log.pre, "\n› " + text + "\n", "st");
-              refreshSoon(); // show results of a long run as they arrive
-              break;
-            case "error":
-              failed = true;
-              stateText = T("Failed: ") + text;
-              append(log.pre, "\n✗ " + text + "\n", "er");
-              break;
-            case "done": stateText = label + ": " + T("done"); break;
+      const resp = await open();
+      if (resumed && resp.status === 404) {
+        if (log) log.box.hidden = true;
+      } else {
+        if (!resp.ok || !resp.body) throw new Error((await resp.text()) || resp.statusText);
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            let event = "message";
+            const data = [];
+            for (const line of chunk.split("\n")) {
+              if (line.startsWith("event:")) event = line.slice(6).trim();
+              else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+            }
+            let text = "";
+            try { text = JSON.parse(data.join("\n")); } catch { text = data.join("\n"); }
+            if (event === "key") { runKey = text; refreshSoon(); } // the page now shows it as running
+            if (!log) continue;
+            switch (event) {
+              case "delta": append(log.pre, text); break;
+              case "status":
+                append(log.pre, "\n› " + text + "\n", "st");
+                refreshSoon(); // show results of a long run as they arrive
+                break;
+              case "error":
+                failed = true;
+                stateText = T("Failed: ") + text;
+                append(log.pre, "\n✗ " + text + "\n", "er");
+                break;
+              case "done": stateText = label + ": " + T("done"); break;
+            }
           }
         }
       }
@@ -391,8 +406,6 @@
       failed = true;
       stateText = T("Failed: ") + err.message;
       if (log) append(log.pre, "\n✗ " + err.message + "\n", "er");
-    } finally {
-      activeRuns--;
     }
     form.classList.remove("running");
     button.disabled = false;
@@ -410,6 +423,15 @@
       location.reload();
     }
   }
+  resumeRuns();
+
+  // Step links leave the page: save unsaved edits first rather than ask.
+  document.addEventListener("click", (ev) => {
+    const link = ev.target.closest(".stepper a, .step-pager a");
+    if (!link || !document.querySelector("form.dirty")) return;
+    ev.preventDefault();
+    saveDirty().then((ok) => { if (ok) location.href = link.href; });
+  });
 
   // ---------------------------------------------------------------- dialogs
   document.addEventListener("click", (ev) => {
@@ -531,22 +553,6 @@
     });
     cat.addEventListener("change", render);
     q.addEventListener("input", render);
-  }
-
-  // ---------------------------------------------------------------- step nav
-  const steps = [...document.querySelectorAll(".stepper .step")];
-  if (steps.length && "IntersectionObserver" in window) {
-    const visible = new Set();
-    const mark = () => {
-      const first = steps.find((a) => visible.has(a.hash.slice(1))) || null;
-      steps.forEach((a) => a.classList.toggle("current", a === first));
-    };
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) e.isIntersecting ? visible.add(e.target.id) : visible.delete(e.target.id);
-      mark();
-    }, { rootMargin: "-25% 0px -55% 0px" });
-    steps.forEach((a) => { const sec = document.getElementById(a.hash.slice(1)); if (sec) io.observe(sec); });
-    afterSync = mark; // merging a page resets the classes
   }
 
   // ---------------------------------------------------------------- picker

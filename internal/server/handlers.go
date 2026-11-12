@@ -14,8 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/ekk1/dramadrama/internal/assets"
 	"github.com/ekk1/dramadrama/internal/pipeline"
@@ -29,6 +27,9 @@ var visualKinds = []string{"character", "scene", "prop", "style"}
 
 func projectURL(id string) string { return "/projects/" + id }
 
+// stepURL is the page of step n of a project.
+func stepURL(id string, n int) string { return fmt.Sprintf("/projects/%s/step/%d", id, n) }
+
 func notFound(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, project.ErrNotFound) || errors.Is(err, assets.ErrNotFound) {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -41,15 +42,16 @@ func notFound(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// update applies fn to the project from the path and redirects back.
-func (s *Server) update(w http.ResponseWriter, r *http.Request, anchor string, fn func(p *project.Project) error) {
+// update applies fn to the project from the path and redirects back, by
+// default to `where` below the project's URL, e.g. "/step/4#shot-x".
+func (s *Server) update(w http.ResponseWriter, r *http.Request, where string, fn func(p *project.Project) error) {
 	id := r.PathValue("id")
 	_, err := s.projects.Update(id, fn)
 	if errors.Is(err, project.ErrNotFound) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	done(w, r, projectURL(id)+anchor, err)
+	done(w, r, projectURL(id)+where, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -97,12 +99,43 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, projectURL(p.ID), http.StatusSeeOther)
 }
 
+// projectView is the data of one step page of a project.
+type projectView struct {
+	P    *project.Project
+	Step int
+}
+
+// handleProject opens a project at the step the work has reached.
 func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 	p, err := s.projects.Get(r.PathValue("id"))
 	if notFound(w, err) {
 		return
 	}
-	s.render(w, r, "project", view{Title: p.Name, Nav: "projects", D: p})
+	step := 1
+	for _, st := range projectSteps(p) {
+		if st.State != "" {
+			step = st.Num
+		}
+	}
+	target := stepURL(p.ID, step)
+	if r.URL.RawQuery != "" { // keep an error message from a post
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// handleStep shows one step of a project.
+func (s *Server) handleStep(w http.ResponseWriter, r *http.Request) {
+	p, err := s.projects.Get(r.PathValue("id"))
+	if notFound(w, err) {
+		return
+	}
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil || n < 1 || n > len(projectSteps(p)) {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, r, "project", view{Title: p.Name, Nav: "projects", D: projectView{P: p, Step: n}})
 }
 
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +148,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveInput(w http.ResponseWriter, r *http.Request) {
-	s.update(w, r, "#s1", func(p *project.Project) error {
+	s.update(w, r, "/step/1", func(p *project.Project) error {
 		if n := strings.TrimSpace(r.FormValue("name")); n != "" {
 			p.Name = n
 		}
@@ -129,14 +162,14 @@ func (s *Server) handleSaveInput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveStory(w http.ResponseWriter, r *http.Request) {
-	s.update(w, r, "#s2", func(p *project.Project) error {
+	s.update(w, r, "/step/2", func(p *project.Project) error {
 		p.Story = strings.TrimSpace(r.FormValue("story"))
 		return nil
 	})
 }
 
 func (s *Server) handleSaveStyle(w http.ResponseWriter, r *http.Request) {
-	s.update(w, r, "#s3", func(p *project.Project) error {
+	s.update(w, r, "/step/3", func(p *project.Project) error {
 		p.Style = strings.TrimSpace(r.FormValue("style"))
 		return nil
 	})
@@ -147,7 +180,7 @@ func (s *Server) handleSaveStyle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAddVisual(w http.ResponseWriter, r *http.Request) {
 	id := assets.NewID("v")
-	s.update(w, r, "#v-"+id, func(p *project.Project) error {
+	s.update(w, r, "/step/3#v-"+id, func(p *project.Project) error {
 		kind := r.FormValue("kind")
 		if kind == "" {
 			kind = "character"
@@ -159,7 +192,7 @@ func (s *Server) handleAddVisual(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSaveVisual(w http.ResponseWriter, r *http.Request) {
 	vid := r.PathValue("vid")
-	s.update(w, r, "#v-"+vid, func(p *project.Project) error {
+	s.update(w, r, "/step/3#v-"+vid, func(p *project.Project) error {
 		v := p.Visual(vid)
 		if v == nil {
 			return errors.New("visual item not found")
@@ -176,7 +209,7 @@ func (s *Server) handleSaveVisual(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteVisual(w http.ResponseWriter, r *http.Request) {
 	vid := r.PathValue("vid")
-	s.update(w, r, "#s3", func(p *project.Project) error {
+	s.update(w, r, "/step/3", func(p *project.Project) error {
 		p.Visuals = slices.DeleteFunc(p.Visuals, func(v project.VisualPrompt) bool { return v.ID == vid })
 		return nil
 	})
@@ -187,7 +220,7 @@ func (s *Server) handleDeleteVisual(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAddShot(w http.ResponseWriter, r *http.Request) {
 	id := assets.NewID("s")
-	s.update(w, r, "#shot-"+id, func(p *project.Project) error {
+	s.update(w, r, "/step/4#shot-"+id, func(p *project.Project) error {
 		sh := project.Shot{ID: id, Duration: 4}
 		at := len(p.Shots)
 		if after := r.FormValue("after"); after != "" {
@@ -206,9 +239,9 @@ func (s *Server) handleAddShot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSaveShot(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
 	r.ParseForm()
-	anchor := "#shot-" + sid
+	anchor := "/step/4#shot-" + sid
 	if a := r.FormValue("anchor"); a != "" {
-		anchor = "#" + a
+		anchor = "/step/5#" + a
 	}
 	s.update(w, r, anchor, func(p *project.Project) error {
 		sh := p.Shot(sid)
@@ -248,7 +281,7 @@ func (s *Server) handleSaveShot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteShot(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
-	s.update(w, r, "#s4", func(p *project.Project) error {
+	s.update(w, r, "/step/4", func(p *project.Project) error {
 		p.Shots = slices.DeleteFunc(p.Shots, func(sh project.Shot) bool { return sh.ID == sid })
 		p.Renumber()
 		return nil
@@ -257,7 +290,7 @@ func (s *Server) handleDeleteShot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMoveShot(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
-	s.update(w, r, "#shot-"+sid, func(p *project.Project) error {
+	s.update(w, r, "/step/4#shot-"+sid, func(p *project.Project) error {
 		i := p.ShotIndex(sid)
 		if i < 0 {
 			return errors.New("shot not found")
@@ -279,17 +312,17 @@ func (s *Server) handleApplyRaw(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	raw := r.FormValue("raw")
 	var err error
-	anchor := "#s3"
+	step := 3
 	switch r.PathValue("kind") {
 	case "visuals":
 		err = s.pipe.ApplyVisualsJSON(id, raw)
 	case "storyboard":
-		err, anchor = s.pipe.ApplyStoryboardJSON(id, raw), "#s4"
+		err, step = s.pipe.ApplyStoryboardJSON(id, raw), 4
 	default:
 		http.NotFound(w, r)
 		return
 	}
-	done(w, r, projectURL(id)+anchor, err)
+	done(w, r, stepURL(id, step), err)
 }
 
 // ---------------------------------------------------------------------------
@@ -503,65 +536,36 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		Model:       strings.TrimSpace(r.FormValue("model")),
 		OnlyMissing: r.FormValue("only_missing") != "",
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	var mu sync.Mutex
-	gone := false
-	send := func(event, data string) {
-		mu.Lock()
-		defer mu.Unlock()
-		if gone {
-			return
-		}
-		b, _ := json.Marshal(data)
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
-			gone = true
-			return
-		}
-		flusher.Flush()
-	}
-	send("key", project.RunKey(req.Stage, req.Target))
-
-	stop := make(chan struct{})
-	go func() { // keep-alive while waiting on slow providers
-		t := time.NewTicker(15 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
+	key := project.RunKey(req.Stage, req.Target)
+	fk := id + "/" + key
+	// If this step is already running, the request follows that run.
+	feed, created := s.feeds.open(fk)
+	if created {
+		ctx := context.WithoutCancel(r.Context()) // the run outlives the request
+		go func() {
+			err := s.pipe.Run(ctx, req, func(e pipeline.Event) { feed.publish(e.Type, e.Text, false) })
+			s.feeds.remove(fk)
+			if err != nil {
+				log.Printf("run %s %s %s: %v", id, req.Stage, req.Target, err)
+				feed.publish("error", err.Error(), true)
 				return
-			case <-r.Context().Done():
-				mu.Lock()
-				gone = true
-				mu.Unlock()
-				return
-			case <-t.C:
-				send("ping", "")
 			}
-		}
-	}()
-	tr := translator(langOf(r))
-	err := s.pipe.Run(context.WithoutCancel(r.Context()), req, func(e pipeline.Event) {
-		if e.Type == "status" {
-			e.Text = tr(e.Text)
-		}
-		send(e.Type, e.Text)
-	})
-	close(stop)
-	if err != nil {
-		log.Printf("run %s %s %s: %v", id, req.Stage, req.Target, err)
-		send("error", tr(err.Error()))
+			feed.publish("done", "ok", true)
+		}()
+	}
+	s.follow(w, r, key, feed)
+}
+
+// handleEvents follows a run that is in progress, from its first event.
+// A page uses it to pick up the runs it finds running when it loads.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	feed := s.feeds.get(r.PathValue("id") + "/" + key)
+	if feed == nil {
+		http.Error(w, "that step is not running", http.StatusNotFound)
 		return
 	}
-	send("done", "ok")
+	s.follow(w, r, key, feed)
 }
 
 // handleDiscardJob forgets an unfinished provider job, so the next run

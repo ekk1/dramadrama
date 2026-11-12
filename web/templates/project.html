@@ -1,4 +1,4 @@
-{{define "content"}}{{$p := .D}}{{$base := printf "/projects/%s" $p.ID}}
+{{define "content"}}{{$p := .D.P}}{{$step := .D.Step}}{{$base := printf "/projects/%s" $p.ID}}{{$here := printf "%s/step/%d" $base $step}}
 <header class="project-head">
   <a class="crumb" href="/projects">{{t "← Projects"}}</a>
   <h1>{{$p.Name}}</h1>
@@ -7,16 +7,17 @@
 
 <div class="workbench {{arClass $p.AspectRatio}}" data-live>
 <nav class="stepper" aria-label="{{t "Steps"}}">
-  {{range steps $p}}<a class="step {{.State}}" href="#s{{.Num}}"><span class="step-dot">{{.Num}}</span><span class="step-label">{{t .Label}}</span>{{if .Info}}<span class="step-info">{{.Info}}</span>{{end}}</a>
+  {{range steps $p}}<a class="step {{.State}}{{if eq .Num $step}} current{{end}}" href="{{$base}}/step/{{.Num}}"{{if eq .Num $step}} aria-current="step"{{end}}><span class="step-dot">{{.Num}}</span><span class="step-label">{{t .Label}}</span>{{if .Info}}<span class="step-info">{{.Info}}</span>{{end}}</a>
   {{end}}
 </nav>
 <div class="stages">
 
 {{/* ------------------------------------------------------------------ 1 */}}
+{{if eq $step 1}}
 <section class="stage" id="s1">
   <h2><span class="num">1</span> {{t "Input"}}</h2>
   <form method="post" action="{{$base}}/input" data-save class="grid-form">
-    <input type="hidden" name="back" value="{{$base}}#s1">
+    <input type="hidden" name="back" value="{{$here}}">
     <label>{{t "Project name"}} <input name="name" value="{{$p.Name}}"></label>
     <label>{{t "Aspect ratio"}}
       <select name="aspect_ratio">{{range aspects}}<option {{if eq . $p.AspectRatio}}selected{{end}}>{{.}}</option>{{end}}</select>
@@ -29,10 +30,12 @@
     </label>
     <div class="wide actions"><button class="btn primary">{{t "Save input"}}</button></div>
   </form>
-  {{template "refs" dict "P" $p "Target" "project" "IDs" $p.ReferenceIDs "Label" "Style reference images" "Primary" false "Back" (printf "%s#s1" $base) "Empty" "No reference images yet. They are sent to vision models in step 3 (configurable in Settings) and can be attached to any image generation."}}
+  {{template "refs" dict "P" $p "Target" "project" "IDs" $p.ReferenceIDs "Label" "Style reference images" "Primary" false "Back" $here "Empty" "No reference images yet. They are sent to vision models in step 3 (configurable in Settings) and can be attached to any image generation."}}
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 2 */}}
+{{if eq $step 2}}
 <section class="stage" id="s2">
   <h2><span class="num">2</span> {{t "Idea expansion"}} {{template "status" dict "P" $p "Stage" "idea" "Target" ""}}</h2>
   <div class="runbar">
@@ -41,15 +44,17 @@
   </div>
   {{template "log" dict "ID" "log-idea"}}
   <form method="post" action="{{$base}}/story" data-save>
-    <input type="hidden" name="back" value="{{$base}}#s2">
+    <input type="hidden" name="back" value="{{$here}}">
     <label>{{t "Story"}} <span class="muted">{{t "(editable; later steps read this text)"}}</span>
       <textarea name="story" rows="16" class="story">{{$p.Story}}</textarea>
     </label>
     <div class="actions"><button class="btn">{{t "Save story"}}</button></div>
   </form>
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 3 */}}
+{{if eq $step 3}}
 <section class="stage" id="s3">
   <h2><span class="num">3</span> {{t "Visual development"}}</h2>
 
@@ -62,7 +67,7 @@
   {{template "log" dict "ID" "log-vp"}}
   {{if $p.VisualsRaw}}
   <form method="post" action="{{$base}}/apply/visuals" class="raw-fix">
-    <input type="hidden" name="back" value="{{$base}}#s3">
+    <input type="hidden" name="back" value="{{$here}}">
     <p class="err-text">{{t "The last output could not be parsed as JSON. Fix it below and apply."}}</p>
     <textarea name="raw" rows="10" class="mono">{{$p.VisualsRaw}}</textarea>
     <button class="btn">{{t "Apply JSON"}}</button>
@@ -70,7 +75,7 @@
   {{end}}
 
   <form method="post" action="{{$base}}/style" data-save>
-    <input type="hidden" name="back" value="{{$base}}#s3">
+    <input type="hidden" name="back" value="{{$here}}">
     <label>{{t "Global style"}} <span class="muted">{{t "(appended to every image prompt)"}}</span>
       <textarea name="style" rows="2">{{$p.Style}}</textarea>
     </label>
@@ -85,7 +90,7 @@
   {{template "log" dict "ID" "log-vi"}}
 
   <div class="cards">
-  {{range $p.Visuals}}{{$v := .}}{{$anchor := printf "%s#v-%s" $base .ID}}
+  {{range $p.Visuals}}{{$v := .}}{{$anchor := printf "%s#v-%s" $here .ID}}
     <article class="card" id="v-{{.ID}}">
       <form method="post" action="{{$base}}/visuals/{{.ID}}" data-save class="grid-form">
         <input type="hidden" name="back" value="{{$anchor}}">
@@ -104,7 +109,7 @@
         {{template "status" dict "P" $p "Stage" "visual_images" "Target" .ID}}
         {{template "jobnote" dict "P" $p "Stage" "visual_images" "Target" .ID "Back" $anchor}}
         <form method="post" action="{{$base}}/visuals/{{.ID}}/delete" class="inline push-right" data-confirm="{{t "Delete this item? Its images stay in the library."}}">
-          <input type="hidden" name="back" value="{{$base}}#s3"><button class="link danger">{{t "delete item"}}</button>
+          <input type="hidden" name="back" value="{{$here}}"><button class="link danger">{{t "delete item"}}</button>
         </form>
       </div>
       {{template "refs" dict "P" $p "Target" (printf "visual-out:%s" .ID) "IDs" .AssetIDs "Label" "Generated images" "Primary" true "Back" $anchor "Empty" "Not generated yet."}}
@@ -115,13 +120,15 @@
   {{end}}
   </div>
   <form method="post" action="{{$base}}/visuals" class="inline">
-    <input type="hidden" name="back" value="{{$base}}#s3">
+    <input type="hidden" name="back" value="{{$here}}">
     <select name="kind" aria-label="{{t "Kind"}}">{{range visualKinds}}<option value="{{.}}">{{t .}}</option>{{end}}</select>
     <button class="btn">{{t "+ Add item"}}</button>
   </form>
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 4 */}}
+{{if eq $step 4}}
 <section class="stage" id="s4">
   <h2><span class="num">4</span> {{t "Storyboard overview"}} {{template "status" dict "P" $p "Stage" "storyboard" "Target" ""}}</h2>
   <div class="runbar">
@@ -132,7 +139,7 @@
   {{template "log" dict "ID" "log-sb"}}
   {{if $p.StoryboardRaw}}
   <form method="post" action="{{$base}}/apply/storyboard" class="raw-fix">
-    <input type="hidden" name="back" value="{{$base}}#s4">
+    <input type="hidden" name="back" value="{{$here}}">
     <p class="err-text">{{t "The last output could not be parsed as JSON. Fix it below and apply."}}</p>
     <textarea name="raw" rows="10" class="mono">{{$p.StoryboardRaw}}</textarea>
     <button class="btn">{{t "Apply JSON"}}</button>
@@ -140,7 +147,7 @@
   {{end}}
 
   <div class="shots">
-  {{range $p.Shots}}{{$anchor := printf "%s#shot-%s" $base .ID}}
+  {{range $p.Shots}}{{$anchor := printf "%s#shot-%s" $here .ID}}
     <article class="shot" id="shot-{{.ID}}">
       <div class="shot-no">{{.Number}}</div>
       <form method="post" action="{{$base}}/shots/{{.ID}}" data-save class="shot-form">
@@ -156,8 +163,8 @@
       <div class="shot-tools">
         <form method="post" action="{{$base}}/shots/{{.ID}}/move" class="inline"><input type="hidden" name="dir" value="up"><input type="hidden" name="back" value="{{$anchor}}"><button class="link" title="{{t "Move up"}}" aria-label="{{t "Move up"}}">↑</button></form>
         <form method="post" action="{{$base}}/shots/{{.ID}}/move" class="inline"><input type="hidden" name="dir" value="down"><input type="hidden" name="back" value="{{$anchor}}"><button class="link" title="{{t "Move down"}}" aria-label="{{t "Move down"}}">↓</button></form>
-        <form method="post" action="{{$base}}/shots" class="inline"><input type="hidden" name="after" value="{{.ID}}"><input type="hidden" name="back" value="{{$base}}#s4"><button class="link" title="{{t "Insert a shot after this one"}}">{{t "+ after"}}</button></form>
-        <form method="post" action="{{$base}}/shots/{{.ID}}/delete" class="inline" data-confirm="{{t "Delete this shot?"}}"><input type="hidden" name="back" value="{{$base}}#s4"><button class="link danger">{{t "delete"}}</button></form>
+        <form method="post" action="{{$base}}/shots" class="inline"><input type="hidden" name="after" value="{{.ID}}"><input type="hidden" name="back" value="{{$here}}"><button class="link" title="{{t "Insert a shot after this one"}}">{{t "+ after"}}</button></form>
+        <form method="post" action="{{$base}}/shots/{{.ID}}/delete" class="inline" data-confirm="{{t "Delete this shot?"}}"><input type="hidden" name="back" value="{{$here}}"><button class="link danger">{{t "delete"}}</button></form>
       </div>
     </article>
   {{else}}
@@ -165,11 +172,13 @@
   {{end}}
   </div>
   <form method="post" action="{{$base}}/shots" class="inline">
-    <input type="hidden" name="back" value="{{$base}}#s4"><button class="btn">{{t "+ Add shot"}}</button>
+    <input type="hidden" name="back" value="{{$here}}"><button class="btn">{{t "+ Add shot"}}</button>
   </form>
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 5 */}}
+{{if eq $step 5}}
 <section class="stage" id="s5">
   <h2><span class="num">5</span> {{t "Shot-level prompts"}} {{template "status" dict "P" $p "Stage" "shot_prompts" "Target" "all"}}</h2>
   <div class="runbar">
@@ -184,7 +193,7 @@
         <span class="shot-no">{{.Number}}</span> <strong>{{.Scene}}</strong> <span class="muted">{{trunc .Action 120}}</span>
       </header>
       <form method="post" action="{{$base}}/shots/{{.ID}}" data-save class="grid-form">
-        <input type="hidden" name="back" value="{{$base}}#{{$anchor}}">
+        <input type="hidden" name="back" value="{{$here}}#{{$anchor}}">
         <label class="wide">{{t "Storyboard description"}} <textarea name="storyboard_prompt" rows="4">{{.StoryboardPrompt}}</textarea></label>
         <label class="wide">{{t "Keyframe prompt"}} <span class="muted">{{t "(English, used for image generation)"}}</span><textarea name="keyframe_prompt" rows="3">{{.KeyframePrompt}}</textarea></label>
         <label class="wide">{{t "Motion prompt"}} <span class="muted">{{t "(English, the prompt of the video clip in step 7)"}}</span><textarea name="motion_prompt" rows="2">{{.MotionPrompt}}</textarea></label>
@@ -200,8 +209,10 @@
   {{end}}
   </div>
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 6 */}}
+{{if eq $step 6}}
 <section class="stage" id="s6">
   <h2><span class="num">6</span> {{t "Keyframes"}} {{template "status" dict "P" $p "Stage" "keyframes" "Target" "all"}}</h2>
   <div class="runbar">
@@ -210,7 +221,7 @@
   </div>
   {{template "log" dict "ID" "log-kf"}}
   <div class="shots">
-  {{range $p.Shots}}{{$sh := .}}{{$anchor := printf "%s#kf-%s" $base .ID}}{{$refs := shotRefs $p $sh}}
+  {{range $p.Shots}}{{$sh := .}}{{$anchor := printf "%s#kf-%s" $here .ID}}{{$refs := shotRefs $p $sh}}
     <article class="card" id="kf-{{.ID}}">
       <header class="card-head">
         <span class="shot-no">{{.Number}}</span> <strong>{{.Scene}}</strong> <span class="muted">{{.Duration}}s{{if .Camera}} · {{.Camera}}{{end}}</span>
@@ -241,8 +252,10 @@
   {{end}}
   </div>
 </section>
+{{end}}
 
 {{/* ------------------------------------------------------------------ 7 */}}
+{{if eq $step 7}}
 <section class="stage" id="s7">
   <h2><span class="num">7</span> {{t "Video clips"}} {{template "status" dict "P" $p "Stage" "clips" "Target" "all"}}</h2>
   <div class="runbar">
@@ -252,7 +265,7 @@
   <p class="muted small hint">{{t "Each clip opens on the shot's keyframe in use and follows its motion prompt. A last frame, reference videos and reference audio are sent if the model takes them; the run log says what was used."}}</p>
   {{template "log" dict "ID" "log-cl"}}
   <div class="shots">
-  {{range $i, $sh := $p.Shots}}{{$anchor := printf "%s#clip-%s" $base .ID}}{{$refs := shotRefs $p .}}
+  {{range $i, $sh := $p.Shots}}{{$anchor := printf "%s#clip-%s" $here .ID}}{{$refs := shotRefs $p .}}
     <article class="card" id="clip-{{.ID}}">
       <header class="card-head">
         <span class="shot-no">{{.Number}}</span> <strong>{{.Scene}}</strong> <span class="muted">{{.Duration}}s{{if .Camera}} · {{.Camera}}{{end}}</span>
@@ -299,13 +312,22 @@
   {{end}}
   </div>
 </section>
+{{end}}
 
+<nav class="step-pager" aria-label="{{t "Steps"}}">
+  {{range steps $p}}{{if eq .Num (add $step -1)}}<a class="btn" href="{{$base}}/step/{{.Num}}">← {{.Num}} · {{t .Label}}</a>{{end}}{{end}}
+  <span class="push-right"></span>
+  {{range steps $p}}{{if eq .Num (add $step 1)}}<a class="btn primary" href="{{$base}}/step/{{.Num}}">{{.Num}} · {{t .Label}} →</a>{{end}}{{end}}
+</nav>
+
+{{if eq $step 1}}
 <section class="stage danger-zone">
   <span class="muted small">{{t "Deleting a project keeps its images in the asset library."}}</span>
   <form method="post" action="{{$base}}/delete" data-confirm="{{t "Delete this project? Its assets stay in the library."}}">
     <button class="btn danger">{{t "Delete project"}}</button>
   </form>
 </section>
+{{end}}
 </div>
 </div>
 {{end}}

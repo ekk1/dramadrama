@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -112,6 +113,21 @@ func (h *harness) get(path string) string {
 	return string(body)
 }
 
+// projectID reads the project out of a project page URL.
+func projectID(u *url.URL) string {
+	return strings.Split(strings.TrimPrefix(u.Path, "/projects/"), "/")[0]
+}
+
+// project returns every step page of a project, concatenated.
+func (h *harness) project(pid string) string {
+	h.t.Helper()
+	var b strings.Builder
+	for n := 1; n <= 7; n++ {
+		b.WriteString(h.get(fmt.Sprintf("/projects/%s/step/%d", pid, n)))
+	}
+	return b.String()
+}
+
 // post submits a form and returns the final URL after redirects.
 func (h *harness) post(path string, form url.Values) *url.URL {
 	h.t.Helper()
@@ -183,7 +199,7 @@ func TestWorkbenchFlow(t *testing.T) {
 	h := newHarness(t)
 	h.get("/projects")
 	u := h.post("/projects", url.Values{"name": {"Demo"}, "idea": {"time machine"}})
-	pid := strings.TrimPrefix(u.Path, "/projects/")
+	pid := projectID(u)
 	if !strings.HasPrefix(pid, "p_") {
 		t.Fatalf("unexpected redirect %s", u)
 	}
@@ -217,7 +233,7 @@ func TestWorkbenchFlow(t *testing.T) {
 		t.Fatalf("unexpected project state: %+v", p)
 	}
 
-	page := h.get("/projects/" + pid)
+	page := h.project(pid)
 	for _, want := range []string{"a girl &amp; a &lt;clock&gt;", "A story about &lt;Lin&gt;", "woman in red", "opens &lt;box&gt;", "/assets/" + p.Shots[0].KeyframeIDs[0] + "/file"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("project page missing %q", want)
@@ -414,7 +430,7 @@ func TestRequestLogPages(t *testing.T) {
 		t.Fatal("empty log page")
 	}
 	u := h.post("/projects", url.Values{"name": {"Logged"}, "idea": {"a quiet idea"}})
-	pid := strings.TrimPrefix(u.Path, "/projects/")
+	pid := projectID(u)
 	h.run(pid, "idea", "")
 
 	page := h.get("/logs?project=" + pid)
@@ -545,7 +561,7 @@ func TestVideoClips(t *testing.T) {
 		return explainingFake{real.(imagegen.Explainer)}, nil
 	}
 	u := h.post("/projects", url.Values{"name": {"Clip"}, "idea": {"x"}})
-	pid := strings.TrimPrefix(u.Path, "/projects/")
+	pid := projectID(u)
 	h.run(pid, "idea", "")
 	h.run(pid, "storyboard", "")
 	h.run(pid, "shot_prompts", "all")
@@ -586,7 +602,7 @@ func TestVideoClips(t *testing.T) {
 	if len(p.Shots[0].ClipIDs) != 1 {
 		t.Fatalf("no clip: %+v", p.Shots[0])
 	}
-	page := h.get("/projects/" + pid)
+	page := h.project(pid)
 	for _, want := range []string{`id="s7"`, "Video clips", `<video src="/assets/` + p.Shots[0].Clip() + `/file"`, "<audio", "Last frame", "7</span>"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("project page missing %q", want)
@@ -631,7 +647,7 @@ func TestVideoClips(t *testing.T) {
 		p.Jobs = map[string]*project.Job{key: {Provider: "fal", Model: "acme/i2v", RequestID: "req-9", SubmittedAt: time.Now()}}
 		return nil
 	})
-	if page := h.get("/projects/" + pid); !strings.Contains(page, "An earlier request is unfinished") || !strings.Contains(page, "req-9") {
+	if page := h.project(pid); !strings.Contains(page, "An earlier request is unfinished") || !strings.Contains(page, "req-9") {
 		t.Error("unfinished job not shown")
 	}
 	h.post("/projects/"+pid+"/jobs/discard", url.Values{"key": {key}})
@@ -646,4 +662,139 @@ type explainingFake struct{ imagegen.Explainer }
 
 func (explainingFake) Generate(ctx context.Context, req *imagegen.Request) (*imagegen.Result, error) {
 	return fakeImage{}.Generate(ctx, req)
+}
+
+// A project opens at the step the work has reached, each step is its own
+// page, and posts go back to the page they came from.
+func TestStepPages(t *testing.T) {
+	h := newHarness(t)
+	u := h.post("/projects", url.Values{"name": {"Demo"}, "idea": {"an idea"}})
+	pid := projectID(u)
+	if u.Path != "/projects/"+pid+"/step/1" {
+		t.Fatalf("new project opened at %s", u.Path)
+	}
+	h.run(pid, "idea", "")
+	h.run(pid, "storyboard", "")
+	resp, err := h.c.Get(h.srv.URL + "/projects/" + pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Request.URL.Path; got != "/projects/"+pid+"/step/4" {
+		t.Errorf("project with a storyboard opened at %s", got)
+	}
+	page := h.get("/projects/" + pid + "/step/4")
+	if !strings.Contains(page, `id="s4"`) || strings.Contains(page, `id="s2"`) || !strings.Contains(page, `aria-current="step"`) {
+		t.Error("step 4 page should show step 4 only")
+	}
+	for _, bad := range []string{"0", "8", "x"} {
+		resp, _ := h.c.Get(h.srv.URL + "/projects/" + pid + "/step/" + bad)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("step %s: status %d", bad, resp.StatusCode)
+		}
+	}
+	// Without a "back" a post answers with the step it belongs to.
+	if u := h.post("/projects/"+pid+"/story", url.Values{"story": {"s"}}); u.Path != "/projects/"+pid+"/step/2" {
+		t.Errorf("saving the story went to %s", u.Path)
+	}
+	back := "/projects/" + pid + "/step/6"
+	if u := h.post("/projects/"+pid+"/story", url.Values{"story": {"s"}, "back": {back}}); u.Path != back {
+		t.Errorf("back ignored: %s", u.Path)
+	}
+}
+
+// slowLLM blocks mid-stream until released, so a test can act during a run.
+type slowLLM struct{ release chan struct{} }
+
+func (c slowLLM) Chat(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	<-c.release
+	return &llm.Response{Text: "late story"}, nil
+}
+
+func (c slowLLM) Stream(ctx context.Context, req *llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		if !yield(llm.Chunk{Delta: "early "}, nil) {
+			return
+		}
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			yield(llm.Chunk{}, ctx.Err())
+			return
+		}
+		yield(llm.Chunk{Delta: "late story"}, nil)
+	}
+}
+
+// A run outlives the request that started it, and another request can
+// follow it from its first event.
+func TestFollowRun(t *testing.T) {
+	h := newHarness(t)
+	slow := slowLLM{release: make(chan struct{})}
+	h.s.pipe.NewLLM = func(*config.Provider) (llm.Client, error) { return slow, nil }
+	pid := projectID(h.post("/projects", url.Values{"name": {"Demo"}, "idea": {"an idea"}}))
+	events := "/projects/" + pid + "/events?key=idea"
+
+	if resp, _ := h.c.Get(h.srv.URL + events); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("events without a run: %d", resp.StatusCode)
+	}
+
+	// Start the run and drop the connection once output arrives.
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "POST", h.srv.URL+"/projects/"+pid+"/run/idea", nil)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := h.c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4096)
+	var got string
+	for !strings.Contains(got, "early") {
+		n, err := resp.Body.Read(buf)
+		if err != nil {
+			t.Fatalf("stream ended early: %v (%s)", err, got)
+		}
+		got += string(buf[:n])
+	}
+	cancel()
+	resp.Body.Close()
+
+	if page := h.get("/projects/" + pid + "/step/2"); !strings.Contains(page, `data-running="idea"`) || !strings.Contains(page, `data-key="idea"`) {
+		t.Error("the page should mark the running step")
+	}
+
+	// A second run request for the same step follows the first one.
+	type result struct{ body string }
+	follow := func(method, path string) chan result {
+		ch := make(chan result, 1)
+		go func() {
+			r, _ := http.NewRequest(method, h.srv.URL+path, nil)
+			resp, err := h.c.Do(r)
+			if err != nil {
+				ch <- result{err.Error()}
+				return
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			ch <- result{string(b)}
+		}()
+		return ch
+	}
+	a, b := follow("GET", events), follow("POST", "/projects/"+pid+"/run/idea")
+	close(slow.release)
+	for _, ch := range []chan result{a, b} {
+		body := (<-ch).body
+		for _, want := range []string{`"idea"`, "early", "late story", "event: done"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("followed stream missing %q: %s", want, body)
+			}
+		}
+	}
+	if p, _ := h.ps.Get(pid); !strings.Contains(p.Story, "late story") || p.Runs["idea"].Status != "done" {
+		t.Errorf("run did not finish: %+v", p.Runs["idea"])
+	}
+	if resp, _ := h.c.Get(h.srv.URL + events); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("events after the run: %d", resp.StatusCode)
+	}
 }
