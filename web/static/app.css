@@ -569,3 +569,4 @@ dialog.modal:has(.modal-form) { width: min(620px, 94vw); }
 }
 .run-log.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
 .step-pager { display: flex; align-items: center; gap: 12px; margin: 4px 0 22px; }
+.modal .flash { grid-column: 1 / -1; margin: 0; max-width: none; }

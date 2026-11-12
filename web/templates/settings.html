@@ -1,6 +1,6 @@
 {{define "content"}}{{$d := .D}}
 <header class="page-head"><h1>{{t "Settings"}}</h1></header>
-<div class="split">
+<div class="split" data-live>
   <nav class="side-list" aria-label="{{t "Settings"}}">
     <a class="side-item {{if eq $d.Tab "providers"}}current{{end}}" href="/settings?tab=providers"><span>{{t "Providers"}}</span><span class="step-info">{{add (len $d.LLM) (len $d.Media)}}</span></a>
     <a class="side-item {{if eq $d.Tab "llm"}}current{{end}}" href="/settings?tab=llm"><span>{{t "Language models"}}</span></a>
